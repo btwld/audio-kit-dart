@@ -8,6 +8,7 @@ import 'package:speech_core/speech_core.dart';
 
 import 'conversion.dart';
 import 'drivers.dart';
+import 'options.dart';
 import 'session_support.dart';
 
 Future<void> _requestObserverClose<T>(StreamController<T> controller) {
@@ -23,8 +24,13 @@ abstract base class _FluidConvertedSinkSession extends FluidManagedSession
     required super.onClosed,
     required this.format,
     required this.driverClose,
+    FluidDiscontinuityPolicy discontinuityPolicy =
+        FluidDiscontinuityPolicy.resume,
     AudioCancellationToken? cancellation,
-  }) : _converter = FluidPcm16MonoConverter(format) {
+  }) : _converter = FluidPcm16MonoConverter(
+         format,
+         discontinuityPolicy: discontinuityPolicy,
+       ) {
     if (cancellation != null) {
       unawaited(
         cancellation.whenCancelled.then<void>((_) => abort()).catchError((
@@ -55,7 +61,22 @@ abstract base class _FluidConvertedSinkSession extends FluidManagedSession
   /// Number of 16 kHz mono samples accepted by the native driver.
   int get convertedSampleCount => _convertedSampleCount;
 
+  /// What this session does with a frame that does not continue the one
+  /// before it.
+  FluidDiscontinuityPolicy get discontinuityPolicy =>
+      _converter.discontinuityPolicy;
+
+  /// Number of breaks in the input this session has carried on across.
+  ///
+  /// Always zero under [FluidDiscontinuityPolicy.fail], which ends the session
+  /// at the first one.
+  int get resumedDiscontinuityCount => _converter.resumedDiscontinuityCount;
+
   /// Offset at the end of accepted audio.
+  ///
+  /// Counts audio the model was given, so audio lost in a break the session
+  /// resumed across is not part of it and every event time after the break is
+  /// early by the length of what was lost.
   Duration get convertedDuration => Duration(
     microseconds:
         (_convertedSampleCount * Duration.microsecondsPerSecond) ~/ 16000,
@@ -267,6 +288,7 @@ final class FluidStreamingSpeechToTextSession extends _FluidConvertedSinkSession
     required super.format,
     required this.languageTag,
     required super.onClosed,
+    super.discontinuityPolicy,
     super.cancellation,
   }) : _driver = driver,
        super(driverClose: driver.close) {
@@ -426,6 +448,7 @@ final class FluidVoiceActivityDetectionSession
     required this.minimumSpeech,
     required this.minimumSilence,
     required super.onClosed,
+    super.discontinuityPolicy,
     super.cancellation,
   }) : _driver = driver,
        super(driverClose: driver.close) {
@@ -572,6 +595,7 @@ final class FluidEndOfUtteranceSession extends _FluidConvertedSinkSession
     required FluidEndOfUtteranceDriver driver,
     required super.format,
     required super.onClosed,
+    super.discontinuityPolicy,
     super.cancellation,
   }) : _driver = driver,
        super(driverClose: driver.close) {
@@ -638,6 +662,43 @@ final class FluidEndOfUtteranceSession extends _FluidConvertedSinkSession
     }
     _lastFinalText = update.text.trim();
     _emitFinal();
+    unawaited(
+      _rearm().catchError((Object _) {
+        // The lifecycle status retains cleanup failures.
+      }),
+    );
+  }
+
+  /// Resets the model after a committed boundary so it can report the next.
+  ///
+  /// FluidAudio commits one boundary and then reports nothing until it is
+  /// reset. The reset is queued behind the writes already accepted, so it
+  /// never lands between the feeds of one frame, and it is skipped once the
+  /// session has ended: a finish that got in first must flush the transcript
+  /// the model still holds.
+  Future<void> _rearm() async {
+    try {
+      await _serialize(() async {
+        if (isTerminal) {
+          return;
+        }
+        await _driver.reset();
+        // The model's transcript starts over, so the next utterance is new
+        // even when it repeats the last one word for word.
+        _lastFinalText = '';
+      });
+    } catch (error, stackTrace) {
+      await fail(
+        fluidAudioFailure(
+          'fluid_eou_reset_failed',
+          AudioFailureStage.provider,
+          'FluidAudio turn detection could not be reset after a turn end.',
+          cause: error,
+        ),
+        error,
+        stackTrace,
+      );
+    }
   }
 
   void _emitFinal() {

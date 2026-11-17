@@ -470,6 +470,9 @@ final class _NativeEndOfUtteranceDriver extends _NativeDriver
   Future<String> finish() => _detector.finish();
 
   @override
+  Future<void> reset() => _detector.reset();
+
+  @override
   Future<void> closeNative() => _detector.dispose();
 }
 
