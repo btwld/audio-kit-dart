@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- Fix end-of-utterance sessions reporting only the first utterance end.
+  FluidAudio's detector commits one boundary and then reports nothing until it
+  is reset; `FluidEndOfUtteranceSession` now resets it after each boundary it
+  reports. The reset is queued behind the writes already accepted and skipped
+  once the session has ended; a reset that fails ends the session with
+  `fluid_eou_reset_failed`.
+- **Breaking for custom runtimes:** `FluidEndOfUtteranceDriver` gains
+  `reset()`. `FluidNativeRuntime` implements it with `FluidEou.reset()`.
+- Streaming recognition, VAD and end-of-utterance sessions no longer end at a
+  discontinuous frame. A capture restart or a jump in sample offsets now drops
+  the conversion state and carries on with the audio after the break
+  (`FluidDiscontinuityPolicy.resume`), because live capture restarts on its
+  own: the system-audio watchdog rebuilds a silent tap two seconds into any
+  session started in silence. `resumedDiscontinuityCount` on a session says how
+  often that happened. Pass
+  `FluidAudioSpeechProvider(streamingDiscontinuityPolicy: FluidDiscontinuityPolicy.fail)`
+  for the previous behaviour (`fluid_discontinuous_audio`). Batch operations
+  and a `FluidPcm16MonoConverter` built without a policy still refuse
+  discontinuous audio.
+- `FluidPcm16MonoConverter` numbers its output as one unbroken stream, so the
+  VAD session's 4096-sample chunking is never cut short by a break upstream.
+
 ## 0.2.0
 
 - Add host-managed model roots to `FluidNativeRuntime`:

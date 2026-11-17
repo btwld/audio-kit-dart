@@ -11,6 +11,28 @@ const String fluidAudioProviderId = 'fluidaudio';
 /// make visible.
 const String fluidDiarizationModelId = 'vbx-diarization';
 
+/// What a FluidAudio audio consumer does with a frame that does not continue
+/// the one before it.
+///
+/// A capture marks such a frame when it restarts or drops audio. The models
+/// take one unbroken stream and have no notion of a gap, so the choice is
+/// between ending the stream and splicing the audio on either side together.
+enum FluidDiscontinuityPolicy {
+  /// Refuse the frame with `fluid_discontinuous_audio`.
+  ///
+  /// For audio whose timeline must stay exact, such as a recording being
+  /// transcribed with word timings: nothing is ever spliced silently.
+  fail,
+
+  /// Drop the conversion state and carry on with the audio after the break.
+  ///
+  /// For live capture, where a track that loses a moment of audio is worth
+  /// more than a track that is gone. The audio on either side of the break is
+  /// handed to the model back to back, so offsets and event times count the
+  /// audio the model was given rather than the time that passed.
+  resume,
+}
+
 /// Parakeet model generation used by FluidAudio recognition.
 enum FluidRecognitionModel {
   /// English-only Parakeet v2.

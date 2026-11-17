@@ -199,6 +199,15 @@ abstract interface class FluidEndOfUtteranceDriver {
   /// Flushes pending model state.
   Future<String> finish();
 
+  /// Discards the model's transcript and state so it can commit another
+  /// utterance boundary.
+  ///
+  /// FluidAudio commits one boundary and then stays in that state: no later
+  /// one is reported until this is called. Runs in call order with [feed], so
+  /// audio fed before it belongs to the utterance being discarded and audio
+  /// fed after it starts the next one.
+  Future<void> reset();
+
   /// Immediately releases native resources. Must be idempotent.
   Future<void> close();
 }
