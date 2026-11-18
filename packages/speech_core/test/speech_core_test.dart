@@ -224,6 +224,8 @@ void main() {
   });
 
   group('SpeechAudioGuards', () {
+    // The Swift oracle drops dictation audio shorter than 16,000 samples at
+    // 16 kHz (DictationManager.swift:148) — one second exactly.
     test('pins the minimum recognition duration at one second', () {
       expect(
         SpeechAudioGuards.minimumRecognitionDuration,
