@@ -38,7 +38,6 @@ WAP_REPO="${WAP_REPO:-$AUDIO_AEC_WAP_REPO}"
 WAP_REF="${WAP_REF:-$AUDIO_AEC_WAP_REF}"
 
 log()  { printf '==> %s\n' "$*"; }
-warn() { printf '!! %s\n' "$*" >&2; }
 die()  { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
 require_cmd() { # cmd hint
@@ -61,7 +60,7 @@ git_clone_pinned() { # repo ref dest
 case "$(uname -s)" in
   Darwin)
     NATIVE_OS=Darwin
-    LIB=libaec_ffi.dylib
+    output_name=libaec_ffi.dylib
     # New Xcode SDKs otherwise stamp the host SDK version into the dylib (for
     # example macOS 26), making a locally built code asset unloadable on the
     # app's supported macOS 12/13 machines. Consumers may raise this baseline,
@@ -69,8 +68,8 @@ case "$(uname -s)" in
     MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
     export MACOSX_DEPLOYMENT_TARGET
     ;;
-  Linux) NATIVE_OS=Linux; LIB=libaec_ffi.so ;;
-  MINGW*|MSYS*|CYGWIN*) NATIVE_OS=Windows; LIB=aec_ffi.dll ;;
+  Linux) NATIVE_OS=Linux; output_name=libaec_ffi.so ;;
+  MINGW*|MSYS*|CYGWIN*) NATIVE_OS=Windows; output_name=aec_ffi.dll ;;
   *) die "Unsupported native build host: $(uname -s)" ;;
 esac
 
@@ -106,13 +105,13 @@ meson setup "$SRC/build" "$SRC" "${options[@]}"
 meson compile -C "$SRC/build" aec_ffi
 
 mkdir -p "$DEST"
-cp "$SRC/build/$LIB" "$DEST/$LIB"
+cp "$SRC/build/$output_name" "$DEST/$output_name"
 if [ "$NATIVE_OS" = Darwin ]; then
-  build_metadata="$(xcrun vtool -show-build "$DEST/$LIB")"
+  build_metadata="$(xcrun vtool -show-build "$DEST/$output_name")"
   minimum="$(awk '$1 == "minos" { print $2 }' <<<"$build_metadata")"
   [ "$minimum" = "$MACOSX_DEPLOYMENT_TARGET" ] ||
     die "Expected macOS $MACOSX_DEPLOYMENT_TARGET, built for $minimum"
-  codesign --force --sign - --timestamp=none "$DEST/$LIB"
-  codesign --verify "$DEST/$LIB"
+  codesign --force --sign - --timestamp=none "$DEST/$output_name"
+  codesign --verify "$DEST/$output_name"
 fi
-log "Built $DEST/$LIB"
+log "Built $DEST/$output_name"

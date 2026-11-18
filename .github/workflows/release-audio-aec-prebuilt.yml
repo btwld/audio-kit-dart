@@ -91,7 +91,12 @@ jobs:
           packages/audio_aec/tool/build_native_windows.sh
           '${{ runner.temp }}/audio-aec-native'
 
-      - name: Probe engine creation and stage exact release bytes
+      - name: Set up Dart for the consumer smoke test
+        uses: dart-lang/setup-dart@2286a0c042b44434fe26d292bbce8d34f7ec662b # v1
+        with:
+          sdk: 3.12.0
+
+      - name: Test the consumer hook, probe the engine, and stage the verified bytes
         shell: bash
         run: |
           set -euo pipefail
@@ -101,6 +106,7 @@ jobs:
             windows-*) library='${{ runner.temp }}/audio-aec-native/aec_ffi.dll' ;;
             *) echo 'unsupported target' >&2; exit 1 ;;
           esac
+          '${{ matrix.python }}' packages/audio_aec/tool/verify_hook.py --library "$library"
           '${{ matrix.python }}' packages/audio_aec/tool/prebuilt_release.py stage \
             --target '${{ matrix.target }}' \
             --library "$library" \
