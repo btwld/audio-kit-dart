@@ -24,7 +24,6 @@
 ///   frameDurationMicros: int, maxBufferedDurationMicros: int,
 ///   overflowPolicy: 'dropOldest' | 'dropNewest' | 'failCapture',
 ///   inputDeviceId: String?,       // endpoint id; null selects the default
-///   processIds: int[],             // exact process trees; requires build 20348
 /// } -> {
 ///   sessionId: int, sourceId: String, trackId: String, clockId: String,
 ///   sampleRate: int, channelCount: int,
@@ -46,10 +45,8 @@
 ///
 /// listAudioInputDevices    {} -> [ { id: String, label: String, isDefault: bool } ]
 /// listSystemAudioSources   {} -> [ { id: String, label: String, isDefault: bool } ]
-/// listAudioProcesses       {} -> [ { processId: int, bundleId: String,
-///                                    isProducingAudio: bool } ]
+/// listAudioProcesses       {} -> []            // always empty, see README
 /// isSystemAudioCaptureSupported {} -> bool
-/// isProcessAudioCaptureSupported {} -> bool
 /// requestSystemAudioCapturePermission {} -> bool
 ///
 /// preparePlayback { sampleRate: int, channelCount: int,
@@ -102,8 +99,6 @@ const String kMethodDisposeCapture = 'disposeCapture';
 // Capability and enumeration.
 const String kMethodIsSystemAudioCaptureSupported =
     'isSystemAudioCaptureSupported';
-const String kMethodIsProcessAudioCaptureSupported =
-    'isProcessAudioCaptureSupported';
 const String kMethodRequestSystemAudioCapturePermission =
     'requestSystemAudioCapturePermission';
 const String kMethodListAudioInputDevices = 'listAudioInputDevices';

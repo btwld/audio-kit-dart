@@ -54,8 +54,6 @@ struct CaptureConfig {
   OverflowPolicy overflow_policy = OverflowPolicy::kFailCapture;
   // Empty selects the default endpoint for `kind`.
   std::string endpoint_id;
-  // Exact requested process trees. Empty selects endpoint capture.
-  std::vector<DWORD> process_ids;
 };
 
 // One WASAPI capture, pulled rather than pushed.
@@ -102,7 +100,6 @@ class CaptureSession {
 
  private:
   void CaptureThreadMain();
-  void ProcessCaptureThreadMain();
   void JoinThread();
   void Emit(SessionPhase phase, const std::string& code = std::string(),
             const std::string& message = std::string());

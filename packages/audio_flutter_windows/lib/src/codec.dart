@@ -79,7 +79,6 @@ Map<String, Object?> encodeCaptureRequest(PlatformCaptureRequest request) =>
       'frameDurationMicros': request.frameDuration.inMicroseconds,
       'maxBufferedDurationMicros': request.maxBufferedDuration.inMicroseconds,
       'overflowPolicy': encodeOverflowPolicy(request.overflowPolicy),
-      'processIds': request.processIds,
       'inputDeviceId': request.inputDeviceId,
     };
 
@@ -104,11 +103,6 @@ PlatformCaptureSessionInfo decodeCaptureSessionInfo(
   trackId: _requireString(reply, 'trackId'),
   clockId: _requireString(reply, 'clockId'),
   format: decodeFormat(reply),
-  timingQuality: switch (reply['timingQuality']) {
-    'nativeMapped' => PlatformCaptureTimingQuality.nativeMapped,
-    'synchronized' => PlatformCaptureTimingQuality.synchronized,
-    _ => PlatformCaptureTimingQuality.synthesized,
-  },
 );
 
 PlatformPlaybackSessionInfo decodePlaybackSessionInfo(
