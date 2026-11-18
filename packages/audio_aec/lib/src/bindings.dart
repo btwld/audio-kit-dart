@@ -68,8 +68,8 @@ final class AecUnavailable implements Exception {
       buffer.write('\n  Cause: $cause');
     }
     buffer.write(
-      '\n  audio_aec does not ship a binary: build one with '
-      'packages/audio_aec/tool/build_native.sh and point '
+      '\n  Check the audio_aec build hook output, or build a library with '
+      'tool/build_native.sh and point '
       '$aecLibraryEnvironmentVariable at the result, or pass an explicit '
       'libraryPath. See the package README, "Native library".',
     );
@@ -81,9 +81,7 @@ final class AecUnavailable implements Exception {
 ///
 /// Everything above this seam — [AecProcessor], and the filter that composes
 /// it — is written against this interface, so the whole stack is exercisable
-/// with an in-Dart fake and no native library present. That matters more here
-/// than in most FFI packages: the library is not distributed, so a
-/// test suite that required it would be a test suite nobody can run.
+/// with an in-Dart fake and no native library present.
 ///
 /// The interface is deliberately pointer-level rather than list-level. Keeping
 /// [Pointer] in the signatures means [AecProcessor]'s real scratch-buffer

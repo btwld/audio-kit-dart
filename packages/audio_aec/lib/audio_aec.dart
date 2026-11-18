@@ -10,8 +10,8 @@
 /// estimation and 10 ms block accumulation — lives in `audio_processing` and is
 /// usable without any native library.
 ///
-/// **This package does not ship a native binary**; see the README for the
-/// loader's resolution order and the state of native distribution.
+/// The build hook verifies and bundles a native runtime on supported desktop
+/// targets. See the README for supported architectures and loader overrides.
 library;
 
 export 'src/bindings.dart';
