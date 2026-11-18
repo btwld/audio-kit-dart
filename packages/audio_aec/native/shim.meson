@@ -1,0 +1,15 @@
+
+# This target is appended to the pinned upstream project in a temporary tree.
+aec_deps = [audio_processing_dep] + common_deps
+aec_link_args = []
+if host_system == 'darwin'
+  aec_deps += [dependency('appleframeworks', modules: ['CoreFoundation', 'Foundation'])]
+  # Dart rewrites LC_ID_DYLIB when bundling a code asset.
+  aec_link_args += ['-Wl,-headerpad_max_install_names']
+endif
+shared_library('aec_ffi', 'aec_ffi.cc',
+  include_directories: include_directories('webrtc'),
+  dependencies: aec_deps,
+  cpp_args: common_cxxflags + ['-DWEBRTC_APM_DEBUG_DUMP=0'],
+  link_args: aec_link_args,
+)
