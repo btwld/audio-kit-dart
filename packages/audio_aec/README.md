@@ -8,10 +8,12 @@ wrongly attributed to the local speaker. This package feeds a system loopback
 capture to AEC3 as the far-end reference and subtracts it from the microphone at
 the signal level.
 
-> **This checkout does not yet pin a released native library.** Until the first
-> reviewed native release is published and its hashes are committed, supply a
-> local or explicitly pinned binary. See
-> [Native library](#native-library).
+On macOS (Apple Silicon and Intel), glibc-based Linux x64, and Windows x64, Dart’s build
+hook downloads the matching [native runtime][runtime] and verifies its SHA-256
+digest. Applications can call `probeAecRuntime()` to check availability for a
+specific format before starting capture.
+
+[runtime]: https://github.com/btwld/audio-kit-dart/releases/tag/audio_aec-native-v0.1.0
 
 ## Layers
 
@@ -140,7 +142,7 @@ accident. Conversion uses `floatToPcm16` / `pcm16ToFloat` from
    hooks and the hook had a binary to offer. This one has no path — the SDK
    copies the library next to your build output and it is addressed by asset id
    — so it is resolved through `@Native` externals rather than
-   `DynamicLibrary.open`. See [`doc/DISTRIBUTION.md`](doc/DISTRIBUTION.md).
+   `DynamicLibrary.open`. See [`doc/DISTRIBUTION.md`](https://github.com/btwld/audio-kit-dart/blob/main/packages/audio_aec/doc/DISTRIBUTION.md).
 3. The `AUDIO_AEC_LIBRARY` environment variable, naming the library file itself
    (not a directory).
 4. Conventional locations beside the running executable: the executable's own
@@ -173,117 +175,30 @@ if (capability.isAvailable) {
 
 ## Native library
 
-**Decided: build hooks, with prebuilt binaries fetched and hash-pinned.** The
-full decision matrix, what was measured and on which SDK, the macOS signing
-findings, and the migration steps are in
-[`doc/DISTRIBUTION.md`](doc/DISTRIBUTION.md).
+Install the package with `dart pub add audio_aec`. The first build for a
+supported target needs network access to fetch the runtime. Dart bundles the
+verified library with the application. The macOS binaries target 12.0 or later.
+Use `dart run`, `dart test`, or `dart build cli` for a standalone Dart
+application. Flutter runs the hook during desktop builds.
 
-`hook/build.dart` supplies the library automatically when it can. Build hooks
-are stable and unflagged on Dart 3.10+ / Flutter 3.38+, and the path was
-verified end to end on Dart 3.12.0 and Flutter 3.44.0 stable under `dart test`,
-`dart run`, `dart build cli` and `flutter build macos`.
-
-Two things to know before depending on this package:
-
-- **This checkout declares no released binaries.** `pinnedSha256` in
-  `hook/prebuilt_manifest.dart` is empty, so the hook produces nothing unless
-  you configure it (below). A CI workflow or GitHub release existing is not a
-  capability claim; only reviewed hashes committed to that map enable the
-  default download path.
-- **`dart compile exe` will refuse to build.** It does not support build hooks,
-  and the restriction is transitive — it applies to anything depending on
-  `audio_aec`, however indirectly. Use `dart build cli --target <entrypoint>`
-  instead. This is the one real cost of the decision.
-
-Point the hook at a library you built with
-[`tool/build_native.sh`](tool/build_native.sh) by adding this to your
-**workspace-root** `pubspec.yaml` (a hook cannot read environment variables —
-it runs in a semi-hermetic environment where they are stripped):
+For offline builds, point the hook at a local library in the consuming
+application’s root `pubspec.yaml`.
 
 ```yaml
 hooks:
   user_defines:
     audio_aec:
       prebuilt: path/to/libaec_ffi.dylib
-      # or: fetch and verify
-      # prebuilt_url: https://example.com/aec_ffi-macos-arm64.dylib
-      # prebuilt_sha256: "91b73004..."   # quote it; YAML types digits as ints
-      # or: build it here, if you have meson
-      # from_source: true
 ```
 
-The hook is **additive and never fails a build**. When it has nothing to offer
-it prints a diagnostic and registers no asset, and the runtime loader below
-behaves exactly as it did before hooks existed.
-
-### Building one
-
-`tool/build_native.sh` fetches webrtc-audio-processing at a pinned revision,
-builds it static with a bundled static Abseil, and links the shim in
-`native/aec_ffi.cc` against it. No WebRTC source is vendored into this
-repository.
-
-```bash
-packages/audio_aec/tool/build_native.sh
-export AUDIO_AEC_LIBRARY="$PWD/packages/audio_aec/.native/libaec_ffi.dylib"
-```
-
-Requires `git`, `meson`, `ninja`, `pkg-config`, and a C++ toolchain. Output goes
-to the gitignored `.native/`; native artifacts are never committed. The macOS
-arm64 path is exercised and produces a self-contained ~2.2 MB dylib depending
-only on system frameworks. Darwin source builds default
-`MACOSX_DEPLOYMENT_TARGET` to 12.0 and fail if the resulting Mach-O advertises a
-higher baseline. Linux and the new Windows MSVC recipe remain unverified until
-their target-specific workflow jobs run green.
-
-The script links with `-headerpad_max_install_names`, which is **required**, not
-cosmetic: the SDK rewrites a code asset's install name to an absolute path, and
-the default Mach-O header padding cannot hold one. Without it the consumer's
-build fails with `larger updated load commands do not fit`.
-
-It also ad-hoc signs the result. That is deliberate and is the right thing to
-redistribute — a consumer's own toolchain re-signs the library with their
-identity (Flutter wraps it in a framework and re-signs it outright), and a
-dylib carrying *our* Developer ID inside *their* app would fail library
-validation against their Team ID. Release notarization is the one macOS
-question still open; see [`doc/DISTRIBUTION.md`](doc/DISTRIBUTION.md).
-
-### Releasing target-specific prebuilts
-
-The repository's `Build audio_aec prebuilt release` workflow is a four-runner
-contract for macOS arm64, macOS x64, Linux x64, and Windows x64. Each runner
-builds from the shared pinned WebRTC revision, loads all six ABI symbols, and
-must successfully create and destroy both 16 kHz and 48 kHz mono engines before
-its bytes are staged. A final job generates and re-verifies
-`audio_aec-prebuilt-manifest.json`, including SHA-256 and byte length for every
-binary and the third-party notice.
-
-Publication is a separate, explicit `publish_release` workflow input. When it
-is false, CI only uploads a review artifact. When true on `main`, CI refuses to
-overwrite an existing `audio_aec-native-v<artifactVersion>` tag. Even a
-successful native release does not turn on package downloads automatically:
-review the manifest, run `tool/prebuilt_release.py render-pins`, and commit the
-result to `hook/prebuilt_manifest.dart` in a later package change.
-
-The workflow contract and Windows recipe were not executed from this macOS
-development host. Until their first green run, the accurate support status is:
-macOS arm64 locally exercised; the other three target builds unverified.
-
-### Testing without one
-
-The whole stack above `AecBindings` is exercised with an in-Dart fake, so the
-test suite needs no native library. One smoke test calls `aec_version` against a
-real library and skips when none is present.
-
-`example/` is the consumer-side counterpart: it asserts `AUDIO_AEC_LIBRARY` is
-unset and then resolves the library purely through the build hook, which is the
-only thing that proves the distribution path rather than the loader.
-`tool/verify_hook.sh` exercises the download-and-verify path, including a
-deliberate hash mismatch.
+If the hook cannot supply a library, `probeAecRuntime()` reports the failure
+and `AecProcessor.create()` can still load an explicitly supplied library.
+See the [distribution guide](https://github.com/btwld/audio-kit-dart/blob/main/packages/audio_aec/doc/DISTRIBUTION.md) for build requirements,
+custom URLs, signing, and release verification.
 
 ## Attribution
 
-Adapted from Control Center (MIT © 2026 Samuel Alev); the native ABI and the
-build script derive from webrtc-audio-processing v2.1 (BSD-3-Clause). See
-`NOTICE` — its binary-distribution obligations apply to whoever ships a built
-library.
+The Dart integration and native shim include adaptations from Control Center
+(MIT, © 2026 Samuel Alev). The runtime includes WebRTC audio processing and
+Abseil. See the [bundled notices](https://github.com/btwld/audio-kit-dart/blob/main/packages/audio_aec/NOTICE)
+for the applicable licenses and redistribution terms.

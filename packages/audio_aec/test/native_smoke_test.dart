@@ -1,9 +1,4 @@
-// The only test that needs a real native library. It is skipped unless one is
-// present, because audio_aec does not ship a binary and a suite that
-// required one would be a suite nobody can run.
-//
-// Build it with `tool/build_native.sh`, or point AUDIO_AEC_LIBRARY at an
-// existing library, and this group runs.
+// Exercises the explicit-path loader against a locally built library.
 
 import 'dart:io';
 import 'dart:typed_data';

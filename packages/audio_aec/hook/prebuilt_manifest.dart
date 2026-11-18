@@ -46,24 +46,16 @@ const String defaultUrlBase =
 /// a binary whose ABI is unchanged.
 const String artifactVersion = '0.1.0';
 
-/// sha256 of each released artifact, keyed by `<os>-<arch>`.
-///
-/// **Empty by design until the first release.** A download is refused when the
-/// target is not in this map, because an unpinned fetch over the network is a
-/// supply-chain hole: whoever controls the URL controls code running in every
-/// consumer's build. The escape hatches are the `prebuilt_sha256` user-define
-/// (pin it yourself) and `allow_unpinned` (explicitly accept the risk); neither
-/// is the default.
-///
-/// Generate a reviewed replacement after the native workflow succeeds with:
-/// ```sh
-/// python3 tool/prebuilt_release.py render-pins \
-///   --manifest release/audio_aec-prebuilt-manifest.json \
-///   --directory release
-/// ```
+/// SHA-256 digests of the published artifacts, keyed by target OS and CPU.
+/// Generated from the verified native release using
+/// `tool/prebuilt_release.py render-pins`.
 const Map<String, String> pinnedSha256 = <String, String>{
-  // 'macos-arm64': '<sha256>',
-  // 'macos-x64': '<sha256>',
-  // 'linux-x64': '<sha256>',
-  // 'windows-x64': '<sha256>',
+  'linux-x64':
+      'b81a46de161389f8e4c8cbc0c91b15d2f18fe7d0c59f4b1916356f36e0cf117b',
+  'macos-arm64':
+      'ae6a21a6b90a6a853cf73455f6d802a00aeb60972a3e904384e4954dcdac1511',
+  'macos-x64':
+      'f7f2ca2f314e8db64e5da5127705b3ed410b184361fbfd0e6e0278bafe34f31d',
+  'windows-x64':
+      '6524a691991f028c4ba35f4ab44adf8b3a18795c54f07e8681ef41e11cae433e',
 };

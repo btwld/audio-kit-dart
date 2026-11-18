@@ -330,8 +330,8 @@ fan the same synthesized frames into recording, metering, or analysis sinks.
 - Native capture restart/drop metadata currently reaches Dart as a dropped
   range; a distinct native `sourceRestart` reason is not transported yet.
 - The default voice controller is half-duplex with VAD barge-in. Full duplex
-  with acoustic echo cancellation is available opt-in via `audio_aec`; its
-  native-library distribution story is still being decided.
+  with acoustic echo cancellation is available through `audio_aec`, whose
+  Dart build hook bundles the pinned runtime on supported desktop targets.
 - The graph is implemented in Dart. FluidAudio-specific fused native routing
   is deferred until profiling justifies it.
 - Packages resolve together in the development workspace. Before releasing a

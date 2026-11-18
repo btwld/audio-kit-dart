@@ -1,19 +1,4 @@
-// Proves the build-hook distribution path from the CONSUMER side.
-//
-// Everything in the parent package's own test suite resolves the library by
-// path — `AUDIO_AEC_LIBRARY` or `.native/`. That proves the loader works; it
-// proves nothing about whether a published package could hand a consumer a
-// binary. This suite is the other half: no environment variable, no explicit
-// path, no file the test can see. The only way `aec_version` answers here is if
-// `hook/build.dart` ran during `dart test`, registered a code asset, and the
-// SDK bundled it.
-//
-// Run with:
-//   packages/audio_aec/tool/build_native.sh   # once, produces ../.native/
-//   cd packages/audio_aec/example && dart test
-//
-// Skips rather than fails when no library was built, so a checkout without a
-// C++ toolchain is not a red suite.
+// Tests the consumer's hook-registered code asset without a path override.
 
 import 'dart:io';
 import 'dart:typed_data';
@@ -31,10 +16,7 @@ void main() {
     });
   }
   final String? skip = asset == null
-      ? 'No code asset was registered. Build one with '
-            'packages/audio_aec/tool/build_native.sh, then re-run: the hook '
-            'reads hooks.user_defines.audio_aec.prebuilt from this package\'s '
-            'pubspec.yaml.'
+      ? 'No native code asset is available in this build.'
       : null;
 
   group('library resolved through the build hook', () {

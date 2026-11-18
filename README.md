@@ -179,7 +179,8 @@ import `dart:io`.
   Windows and Linux capture/playback implementations exist but are not yet
   validated on real hardware.
   Echo cancellation (`audio_aec`) and an opt-in full-duplex voice mode are
-  implemented; the AEC native library currently requires a local build.
+  available with pinned desktop runtimes for macOS arm64/x64, Linux x64,
+  and Windows x64.
 - Native Fluid-specific fused routing is intentionally deferred; the generic
   Dart graph is the current correctness path.
 

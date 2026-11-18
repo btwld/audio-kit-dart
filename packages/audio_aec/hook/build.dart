@@ -1,27 +1,8 @@
-// Build hook: supplies the native AEC3 library as a code asset, when it can.
-//
-// This hook is ADDITIVE. It never fails a build. When it can produce nothing it
-// says so on stderr and exits cleanly with no assets, and the runtime loader in
-// `lib/src/bindings.dart` — explicit path, then `AUDIO_AEC_LIBRARY`, then
-// conventional locations — behaves exactly as it did before the hook existed.
-// A consumer on an SDK that does not run hooks at all is in that same state.
-//
-// Strategy, in order:
-//   1. `prebuilt` user-define      — a library file already on disk.
-//   2. `prebuilt_url` / `_url_base`— download, verify sha256, register.
-//   3. `from_source` user-define   — run tool/build_native.sh (needs meson).
-//   4. Nothing, with a diagnostic.
-//
-// ## Configuration is user-defines, not environment variables
-//
-// Hooks run in a SEMI-HERMETIC environment: `Platform.environment` is stripped
-// to an allow-list (PATH, HOME, TEMP, HTTP_PROXY, ANDROID_*, CCACHE_*, NIX_*).
-// A variable like `AUDIO_AEC_FROM_SOURCE=1` set in the consumer's shell is
-// simply NOT VISIBLE here — verified on Dart 3.12.0, see doc/DISTRIBUTION.md.
-// That is deliberate on the SDK's part: hook inputs have to be declared to be
-// cacheable. So every knob below is a `hooks.user_defines.audio_aec` key in the
-// consumer's workspace-root `pubspec.yaml`, which the SDK hashes into the cache
-// key.
+// Bundles the native AEC3 library for the requested target. The consuming
+// workspace can select a local file, a custom download or a native source
+// build through hooks.user_defines.audio_aec. Supported targets otherwise
+// use the pinned public release. If no asset is available, the runtime can
+// still load an explicitly supplied library.
 
 import 'dart:io';
 
@@ -95,17 +76,25 @@ Future<File?> _resolveLibrary(
     return null;
   }
 
-  // 2. A pinned download.
-  final _Download? download = _plan(input, os, arch);
-  if (download != null) {
-    return _fetch(input, download, os);
-  }
-
-  // 3. Build from source, only when explicitly asked.
-  if (input.userDefines['from_source'] == true) {
+  // An explicit source build takes precedence over the package's release pins.
+  // An explicit download URL or digest still takes precedence over compilation.
+  if (input.userDefines['from_source'] == true &&
+      input.userDefines['prebuilt_url'] == null &&
+      input.userDefines['prebuilt_url_base'] == null &&
+      input.userDefines['prebuilt_sha256'] == null) {
+    if ((os != 'macos' && os != 'linux') ||
+        os != OS.current.name ||
+        arch != Architecture.current.name) {
+      stderr.writeln(
+        'audio_aec: from_source requires a matching macOS or Linux host for $os-$arch.',
+      );
+      return null;
+    }
     return _buildFromSource(input, os);
   }
-  return null;
+
+  final _Download? download = _plan(input, os, arch);
+  return download == null ? null : _fetch(input, download, os);
 }
 
 /// What to fetch and what it must hash to; `null` when no URL is configured.
@@ -115,10 +104,6 @@ _Download? _plan(BuildInput input, String os, String arch) {
   final Object? pin = input.userDefines['prebuilt_sha256'];
   final bool allowUnpinned = input.userDefines['allow_unpinned'] == true;
 
-  // No released artifacts exist yet, so the default base is not used unless the
-  // consumer opts in by pinning a hash. Reaching for `defaultUrlBase` with an
-  // empty manifest would produce a 404 on every build.
-  //
   // `pin` is stringified rather than type-tested because YAML types an unquoted
   // all-digit hash as an *integer*, and silently treating that as "no pin
   // supplied" would downgrade a consumer's verification to none — the one
@@ -160,11 +145,9 @@ _Download? _plan(BuildInput input, String os, String arch) {
 /// build breaks because a release server had a bad minute is worse than one
 /// that falls back to `AUDIO_AEC_LIBRARY`.
 Future<File?> _fetch(BuildInput input, _Download plan, String os) async {
-  // outputDirectoryShared survives across builds and is shared between targets,
-  // so a second `dart test` in the same workspace does not re-download.
-  final Uri cacheUri = input.outputDirectoryShared.resolve(
-    installedLibraryName(os),
-  );
+  // A universal desktop build can run separate hooks for arm64 and x64.
+  // Keep each downloaded library with the target and user-defines that selected it.
+  final Uri cacheUri = input.outputDirectory.resolve(installedLibraryName(os));
   final File cached = File.fromUri(cacheUri);
   if (cached.existsSync() &&
       (plan.sha256 == null || _hash(cached) == plan.sha256)) {
@@ -223,13 +206,6 @@ Future<File?> _fetch(BuildInput input, _Download plan, String os) async {
 
 /// Runs `tool/build_native.sh`, which needs meson, ninja and a C++ toolchain.
 Future<File?> _buildFromSource(BuildInput input, String os) async {
-  if (os == 'windows') {
-    stderr.writeln(
-      'audio_aec: from_source is not supported on Windows — '
-      'tool/build_native.sh is a bash script and the MSVC path is not covered.',
-    );
-    return null;
-  }
   final File script = File.fromUri(
     input.packageRoot.resolve('tool/build_native.sh'),
   );
@@ -237,25 +213,17 @@ Future<File?> _buildFromSource(BuildInput input, String os) async {
     stderr.writeln('audio_aec: ${script.path} is missing.');
     return null;
   }
-  // A published package's `tool/` is present but meson usually is not, so check
-  // before spending a clone on it.
-  final ProcessResult probe = await Process.run('meson', <String>['--version']);
-  if (probe.exitCode != 0) {
-    stderr.writeln(
-      'audio_aec: from_source requested but meson is not on PATH. '
-      'Install meson, ninja and pkg-config, or drop from_source.',
-    );
+  final Uri dest = input.outputDirectory.resolve('from_source/');
+  final ProcessResult result;
+  try {
+    result = await Process.run('bash', <String>[
+      script.path,
+      dest.toFilePath(),
+    ]);
+  } on ProcessException catch (error) {
+    stderr.writeln('audio_aec: could not start the native build: $error');
     return null;
   }
-
-  final Uri dest = input.outputDirectoryShared.resolve('from_source/');
-  stderr.writeln(
-    'audio_aec: building from source (meson ${(probe.stdout as String).trim()})'
-    ' — this clones webrtc-audio-processing and takes several minutes.',
-  );
-  final ProcessResult result = await Process.run(script.path, <String>[
-    dest.toFilePath(),
-  ], runInShell: true);
   if (result.exitCode != 0) {
     stderr.writeln(
       'audio_aec: tool/build_native.sh failed (exit ${result.exitCode}):\n'
@@ -269,8 +237,7 @@ Future<File?> _buildFromSource(BuildInput input, String os) async {
 
 String _hash(File file) => sha256.convert(file.readAsBytesSync()).toString();
 
-/// The nothing-to-do message. Deliberately actionable and deliberately not an
-/// error: this is the package's documented default state.
+/// Explains how to supply a library when the hook cannot register one.
 void _diagnose(String target) {
   stderr.writeln(
     'audio_aec: no native library for $target — registering no code asset.\n'
