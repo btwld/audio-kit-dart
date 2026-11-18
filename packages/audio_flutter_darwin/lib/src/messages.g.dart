@@ -193,7 +193,6 @@ class CaptureRequestMessage {
     required this.maxBufferedDurationMicros,
     required this.overflowPolicy,
     required this.processIds,
-    this.bundleIds,
     this.inputDeviceId,
     this.rawRecordingPath,
   });
@@ -210,14 +209,6 @@ class CaptureRequestMessage {
 
   List<int> processIds;
 
-  /// Application bundle IDs to tap, independent of which processes currently
-  /// carry them.
-  ///
-  /// macOS 26 taps these identities directly and restores them across app
-  /// exit and relaunch; older versions resolve them to process objects when
-  /// the chain is built, which is re-done on every rebuild.
-  List<String>? bundleIds;
-
   String? inputDeviceId;
 
   String? rawRecordingPath;
@@ -230,7 +221,6 @@ class CaptureRequestMessage {
       maxBufferedDurationMicros,
       overflowPolicy,
       processIds,
-      bundleIds,
       inputDeviceId,
       rawRecordingPath,
     ];
@@ -248,9 +238,8 @@ class CaptureRequestMessage {
       maxBufferedDurationMicros: result[3]! as int,
       overflowPolicy: result[4]! as CaptureOverflowPolicyMessage,
       processIds: (result[5]! as List<Object?>).cast<int>(),
-      bundleIds: (result[6] as List<Object?>?)?.cast<String>(),
-      inputDeviceId: result[7] as String?,
-      rawRecordingPath: result[8] as String?,
+      inputDeviceId: result[6] as String?,
+      rawRecordingPath: result[7] as String?,
     );
   }
 
@@ -263,7 +252,7 @@ class CaptureRequestMessage {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(kind, other.kind) && _deepEquals(outputFormat, other.outputFormat) && _deepEquals(frameDurationMicros, other.frameDurationMicros) && _deepEquals(maxBufferedDurationMicros, other.maxBufferedDurationMicros) && _deepEquals(overflowPolicy, other.overflowPolicy) && _deepEquals(processIds, other.processIds) && _deepEquals(bundleIds, other.bundleIds) && _deepEquals(inputDeviceId, other.inputDeviceId) && _deepEquals(rawRecordingPath, other.rawRecordingPath);
+    return _deepEquals(kind, other.kind) && _deepEquals(outputFormat, other.outputFormat) && _deepEquals(frameDurationMicros, other.frameDurationMicros) && _deepEquals(maxBufferedDurationMicros, other.maxBufferedDurationMicros) && _deepEquals(overflowPolicy, other.overflowPolicy) && _deepEquals(processIds, other.processIds) && _deepEquals(inputDeviceId, other.inputDeviceId) && _deepEquals(rawRecordingPath, other.rawRecordingPath);
   }
 
   @override
@@ -272,7 +261,7 @@ class CaptureRequestMessage {
 
   @override
   String toString() {
-    return 'CaptureRequestMessage(kind: $kind, outputFormat: $outputFormat, frameDurationMicros: $frameDurationMicros, maxBufferedDurationMicros: $maxBufferedDurationMicros, overflowPolicy: $overflowPolicy, processIds: $processIds, bundleIds: $bundleIds, inputDeviceId: $inputDeviceId, rawRecordingPath: $rawRecordingPath)';
+    return 'CaptureRequestMessage(kind: $kind, outputFormat: $outputFormat, frameDurationMicros: $frameDurationMicros, maxBufferedDurationMicros: $maxBufferedDurationMicros, overflowPolicy: $overflowPolicy, processIds: $processIds, inputDeviceId: $inputDeviceId, rawRecordingPath: $rawRecordingPath)';
   }
 }
 
