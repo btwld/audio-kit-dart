@@ -22,19 +22,9 @@
 # abseil is statically linked from the meson wrap (NOT a system/Homebrew shared
 # abseil) so the result is self-contained and relocatable.
 #
-# STATUS: the macOS (arm64) path is exercised. The Linux path is carried over
-# from the original and is UNTESTED on this host. Windows uses the separate
-# build_native_windows.sh MSVC recipe and is verified only by its target CI job.
-#
-# Requirements: git, meson, ninja, pkg-config, a C++ compiler (c++).
-#
-# Usage:
-#   packages/audio_aec/tool/build_native.sh [DEST_DIR]
-#   WAP_REF=<sha> packages/audio_aec/tool/build_native.sh
-#   MACOSX_DEPLOYMENT_TARGET=13.0 packages/audio_aec/tool/build_native.sh
-#
-# DEST_DIR defaults to <package>/.native. Point the loader at the result with:
-#   export AUDIO_AEC_LIBRARY="$(pwd)/packages/audio_aec/.native/libaec_ffi.dylib"
+# Requirements: git, Meson, Ninja and a C++ toolchain. Windows builds run
+# under Git Bash with the x64 developer environment set up by the workflow.
+# Usage: tool/build_native.sh [DEST_DIR]
 set -euo pipefail
 
 PKG_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -48,7 +38,6 @@ WAP_REPO="${WAP_REPO:-$AUDIO_AEC_WAP_REPO}"
 WAP_REF="${WAP_REF:-$AUDIO_AEC_WAP_REF}"
 
 log()  { printf '==> %s\n' "$*"; }
-warn() { printf '!! %s\n' "$*" >&2; }
 die()  { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
 require_cmd() { # cmd hint
@@ -71,7 +60,7 @@ git_clone_pinned() { # repo ref dest
 case "$(uname -s)" in
   Darwin)
     NATIVE_OS=Darwin
-    NATIVE_EXT=dylib
+    output_name=libaec_ffi.dylib
     # New Xcode SDKs otherwise stamp the host SDK version into the dylib (for
     # example macOS 26), making a locally built code asset unloadable on the
     # app's supported macOS 12/13 machines. Consumers may raise this baseline,
@@ -79,21 +68,13 @@ case "$(uname -s)" in
     MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
     export MACOSX_DEPLOYMENT_TARGET
     ;;
-  Linux)  NATIVE_OS=Linux;  NATIVE_EXT=so ;;
-  *)
-    warn "build_native.sh: unsupported platform $(uname -s). Build the library with an MSVC toolchain and point AUDIO_AEC_LIBRARY at it."
-    exit 0 ;;
+  Linux) NATIVE_OS=Linux; output_name=libaec_ffi.so ;;
+  MINGW*|MSYS*|CYGWIN*) NATIVE_OS=Windows; output_name=aec_ffi.dll ;;
+  *) die "Unsupported native build host: $(uname -s)" ;;
 esac
 
-require_cmd git "Install Xcode Command Line Tools (macOS) or your package manager's git."
-require_cmd meson "Install via 'brew install meson' (macOS) or 'pip install meson' (Linux)."
-require_cmd ninja "Install via 'brew install ninja' (macOS) or 'apt install ninja-build' (Linux)."
-require_cmd pkg-config "Install via 'brew install pkg-config' (macOS) or 'apt install pkg-config' (Linux)."
-CXX="${CXX:-c++}"
-require_cmd "$CXX" "Install a C++ toolchain (Xcode CLT on macOS, build-essential on Linux) and re-run."
-[ -f "$SHIM" ] || die "shim source not found: $SHIM"
+for cmd in git meson ninja; do require_cmd "$cmd" "Install $cmd and rerun."; done
 
-LIB="libaec_ffi.$NATIVE_EXT"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -107,102 +88,31 @@ SRC="$WORK/wap"
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$SRC" show -s --format=%ct HEAD)}"
 export SOURCE_DATE_EPOCH ZERO_AR_DATE=1
 
-log "Configuring webrtc-audio-processing (static lib, AEC3, bundled static abseil)"
-( cd "$SRC" && meson setup build \
-    --buildtype=release \
-    --default-library=static \
-    --force-fallback-for=abseil-cpp >/dev/null )
-
-# Build all static archives. The 'examples/run-offline' target's link fails on
-# macOS (upstream omits CoreFoundation/Foundation from its link line); that is
-# the LAST target and every archive needed here is already built by then, so the
-# failure is expected and ignored.
-log "Building static archives (the example target's link is expected to fail on macOS — ignored)"
-( cd "$SRC" && ninja -C build || true )
-
-MAIN_AR="$SRC/build/webrtc/modules/audio_processing/libwebrtc-audio-processing-2.a"
-[ -f "$MAIN_AR" ] || die "APM static archive not built: $MAIN_AR (check the meson/ninja output above)"
-
-ABSEIL_INC="$(find "$SRC/subprojects" -maxdepth 1 -type d -name 'abseil-cpp-*' | head -1)"
-[ -n "$ABSEIL_INC" ] || die "abseil subproject not unpacked under $SRC/subprojects (force-fallback failed?)"
-
-if [ "$NATIVE_OS" = "Darwin" ]; then
-  OS_DEFINE="-DWEBRTC_MAC"
-else
-  OS_DEFINE="-DWEBRTC_LINUX"
+# Build the shim as a Meson target so the upstream dependency graph supplies
+# architecture flags, static archives in link order, and system libraries.
+cp "$SHIM" "$SRC/aec_ffi.cc"
+cat "$PKG_ROOT/native/shim.meson" >> "$SRC/meson.build"
+options=(--buildtype=release --default-library=static --force-fallback-for=abseil-cpp)
+if [ "$NATIVE_OS" = Windows ]; then
+  require_cmd cl "Load the x64 Visual Studio developer environment."
+  # Git Bash prepends its Unix utilities, including an unrelated link.exe.
+  # Meson and Ninja must see the MSVC linker in the same directory as cl.exe.
+  export PATH="$(dirname "$(command -v cl)"):$PATH"
+  export CC=cl CXX=cl
+  # The pinned WebRTC source uses C++20 designated initializers on MSVC.
+  options+=(-Db_vscrt=mt -Dcpp_std=c++20)
 fi
-
-log "Compiling shim ($SHIM) for $NATIVE_OS"
-"$CXX" -std=c++17 -O2 -fPIC \
-  -DWEBRTC_POSIX "$OS_DEFINE" -DWEBRTC_APM_DEBUG_DUMP=0 \
-  -ffile-prefix-map="$WORK"=/usr/src/audio_aec \
-  -fdebug-prefix-map="$WORK"=/usr/src/audio_aec \
-  -Wno-nullability-completeness \
-  -I "$SRC/webrtc" -I "$ABSEIL_INC" \
-  -c "$SHIM" -o "$WORK/aec_ffi.o"
-
-# Whole-archive the main APM archive so every AEC3 object is present (some are
-# only reached via internal wiring); normal-load the deps + static abseil (only
-# referenced objects pulled).
-OTHER_ARCHIVES=()
-while IFS= read -r a; do
-  [ "$a" = "$MAIN_AR" ] || OTHER_ARCHIVES+=("$a")
-done < <(find "$SRC/build" -name '*.a')
-
-if [ "$NATIVE_OS" = "Darwin" ]; then
-  # -headerpad_max_install_names is REQUIRED, not cosmetic. A build hook hands
-  # this dylib to the SDK as a code asset; the SDK then copies it next to the
-  # consumer's output and rewrites LC_ID_DYLIB to that absolute path with
-  # install_name_tool. The default header pad (56 bytes here) cannot hold a real
-  # absolute path, and the rewrite fails hard with "larger updated load commands
-  # do not fit (the program must be relinked)". See doc/DISTRIBUTION.md.
-  log "Linking $LIB (force_load APM + ${#OTHER_ARCHIVES[@]} dep/abseil archives + CoreFoundation/Foundation)"
-  "$CXX" -dynamiclib -o "$WORK/$LIB" "$WORK/aec_ffi.o" \
-    -Wl,-force_load,"$MAIN_AR" \
-    "${OTHER_ARCHIVES[@]}" \
-    -framework CoreFoundation -framework Foundation \
-    -Wl,-headerpad_max_install_names \
-    -install_name "@rpath/$LIB"
-else
-  # GNU ld: --whole-archive is the force_load equivalent and is order-sensitive,
-  # so the deps follow inside the no-whole-archive section.
-  log "Linking $LIB (--whole-archive APM + ${#OTHER_ARCHIVES[@]} dep/abseil archives)"
-  "$CXX" -shared -o "$WORK/$LIB" "$WORK/aec_ffi.o" \
-    -Wl,--whole-archive "$MAIN_AR" -Wl,--no-whole-archive \
-    "${OTHER_ARCHIVES[@]}" \
-    -Wl,-soname,"$LIB" -Wl,--build-id=sha256 \
-    -lpthread -lm
-fi
-
-# Sanity: confirm the C symbols are exported and there are no system-abseil
-# runtime deps (the library must be self-contained).
-if [ "$NATIVE_OS" = "Darwin" ]; then
-  nm -gU "$WORK/$LIB" | grep -q "_aec_create" || die "built $LIB is missing the aec_create symbol"
-  BUILD_METADATA="$(xcrun vtool -show-build "$WORK/$LIB")"
-  printf '%s\n' "$BUILD_METADATA" | grep -Eq 'minos[[:space:]]+12\.0([[:space:]]|$)' ||
-    die "built $LIB does not declare the required macOS 12.0 minimum deployment target"
-  if otool -L "$WORK/$LIB" | grep -qi "Cellar/abseil\|/abseil"; then
-    warn "WARNING: $LIB links a non-bundled abseil — not self-contained:"
-    otool -L "$WORK/$LIB" | grep -i abseil >&2 || true
-  fi
-else
-  nm -D "$WORK/$LIB" | grep -q " aec_create" || die "built $LIB is missing the aec_create symbol"
-  if ldd "$WORK/$LIB" 2>/dev/null | grep -qi "abseil"; then
-    warn "WARNING: $LIB links a system abseil — not self-contained:"
-    ldd "$WORK/$LIB" | grep -i abseil >&2 || true
-  fi
-fi
+meson setup "$SRC/build" "$SRC" "${options[@]}"
+meson compile -C "$SRC/build" aec_ffi
 
 mkdir -p "$DEST"
-cp -f "$WORK/$LIB" "$DEST/$LIB"
-
-# Ad-hoc sign so the library loads under the local Hardened Runtime. This is NOT
-# distribution signing: a redistributed dylib needs a Developer ID identity and
-# notarization (see the native library section in the README).
-if [ "$NATIVE_OS" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
-  codesign --force --sign - --timestamp=none "$DEST/$LIB" >/dev/null 2>&1 ||
-    warn "codesign failed for $DEST/$LIB (the library may still load locally)"
+cp "$SRC/build/$output_name" "$DEST/$output_name"
+if [ "$NATIVE_OS" = Darwin ]; then
+  build_metadata="$(xcrun vtool -show-build "$DEST/$output_name")"
+  minimum="$(awk '$1 == "minos" { print $2 }' <<<"$build_metadata")"
+  [ "$minimum" = "$MACOSX_DEPLOYMENT_TARGET" ] ||
+    die "Expected macOS $MACOSX_DEPLOYMENT_TARGET, built for $minimum"
+  codesign --force --sign - --timestamp=none "$DEST/$output_name"
+  codesign --verify "$DEST/$output_name"
 fi
-
-log "Done. Installed $DEST/$LIB ($(du -h "$DEST/$LIB" | cut -f1))."
-log "Point the loader at it:  export AUDIO_AEC_LIBRARY=\"$DEST/$LIB\""
+log "Built $DEST/$output_name"

@@ -16,16 +16,6 @@ dependencies:
 dev_dependencies:
   test: ^1.26.3
 
-# Being outside the workspace means a plain `path` dependency on audio_aec still
-# pulls its siblings from pub.dev, where the published 0.1.0 APIs predate this
-# checkout. Override them to the working tree so the example builds what is
-# actually here.
-dependency_overrides:
-  audio_core:
-    path: ../../audio_core
-  audio_processing:
-    path: ../../audio_processing
-
 # The knobs `hook/build.dart` reads. `prebuilt` is a path resolved against THIS
 # file, which is why the example can name the gitignored build output without
 # hard-coding anyone's home directory.

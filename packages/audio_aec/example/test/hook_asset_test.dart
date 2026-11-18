@@ -23,6 +23,13 @@ import 'package:test/test.dart';
 
 void main() {
   final NativeAssetAecBindings? asset = NativeAssetAecBindings.tryResolve();
+  final String? expected = Platform.environment['AUDIO_AEC_EXPECT_ASSET'];
+  if (expected != null) {
+    test('build hook registration matches the expected result', () {
+      expect(expected, isIn(<String>['present', 'absent']));
+      expect(asset != null, expected == 'present');
+    });
+  }
   final String? skip = asset == null
       ? 'No code asset was registered. Build one with '
             'packages/audio_aec/tool/build_native.sh, then re-run: the hook '

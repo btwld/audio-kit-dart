@@ -45,13 +45,19 @@ struct AecInstance {
 
 }  // namespace
 
+#ifdef _WIN32
+#define AEC_EXPORT __declspec(dllexport)
+#else
+#define AEC_EXPORT __attribute__((visibility("default")))
+#endif
+
 extern "C" {
 
 // Creates an AEC instance for [sample_rate_hz] / [num_channels]. Enables AEC3
 // (mobile_mode off) + the high-pass filter; deliberately leaves AGC and noise
 // suppression off so the user's own voice stays natural for the recognizer.
 // Returns an opaque handle, or null on failure.
-void* aec_create(int sample_rate_hz, int num_channels) {
+AEC_EXPORT void* aec_create(int sample_rate_hz, int num_channels) {
   // Keep malformed FFI callers away from WebRTC's assertion-heavy format
   // constructors. Dart validates the same contract, but the C ABI is public
   // and release probing deliberately treats a null handle as a safe failure.
@@ -85,7 +91,7 @@ void* aec_create(int sample_rate_hz, int num_channels) {
 
 // Feeds one far-end (loopback/render) block of [frames] mono samples. AEC3
 // buffers this as the reference it later subtracts from the mic.
-void aec_process_reverse(void* handle, const int16_t* ref, int frames) {
+AEC_EXPORT void aec_process_reverse(void* handle, const int16_t* ref, int frames) {
   (void)frames;  // size comes from the instance's StreamConfig
   auto* inst = static_cast<AecInstance*>(handle);
   if (inst == nullptr || ref == nullptr) {
@@ -103,7 +109,7 @@ void aec_process_reverse(void* handle, const int16_t* ref, int frames) {
 // two independent captures and feeds it here; AEC3 still refines it internally,
 // but a correct external hint is what lets its estimator lock when the two
 // streams have an unknown, hardware-specific offset.
-void aec_process_capture(void* handle, const int16_t* cap, int16_t* out,
+AEC_EXPORT void aec_process_capture(void* handle, const int16_t* cap, int16_t* out,
                          int frames, int stream_delay_ms) {
   (void)frames;
   auto* inst = static_cast<AecInstance*>(handle);
@@ -124,7 +130,7 @@ void aec_process_capture(void* handle, const int16_t* cap, int16_t* out,
 // Unavailable metrics are written as sentinels (doubles: -1000.0; delay: -1) so
 // the Dart side can map them to null. Any out pointer may be non-null; all are
 // written.
-void aec_get_metrics(void* handle, double* erl, double* erle, double* residual,
+AEC_EXPORT void aec_get_metrics(void* handle, double* erl, double* erle, double* residual,
                      int* delay_ms) {
   if (erl) *erl = -1000.0;
   if (erle) *erle = -1000.0;
@@ -150,12 +156,12 @@ void aec_get_metrics(void* handle, double* erl, double* erle, double* residual,
 }
 
 // Destroys the instance created by aec_create.
-void aec_destroy(void* handle) {
+AEC_EXPORT void aec_destroy(void* handle) {
   delete static_cast<AecInstance*>(handle);
 }
 
 // Static version string for FFI smoke tests; do not free.
-const char* aec_version(void) {
+AEC_EXPORT const char* aec_version(void) {
   return "webrtc-audio-processing-2.1+aec3";
 }
 

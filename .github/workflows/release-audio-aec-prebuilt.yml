@@ -64,7 +64,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes \
-            build-essential git meson ninja-build pkg-config
+            build-essential git ninja-build pkg-config
+          python3 -m pip install --disable-pip-version-check meson==1.12.1
 
       - name: Set up x64 MSVC developer environment
         if: matrix.builder == 'windows'
@@ -74,7 +75,7 @@ jobs:
 
       - name: Install Windows build prerequisites
         if: matrix.builder == 'windows'
-        run: python -m pip install --disable-pip-version-check meson ninja
+        run: python -m pip install --disable-pip-version-check meson==1.12.1 ninja
 
       - name: Build macOS or Linux AEC3 library
         if: matrix.builder == 'posix'
@@ -90,7 +91,12 @@ jobs:
           packages/audio_aec/tool/build_native_windows.sh
           '${{ runner.temp }}/audio-aec-native'
 
-      - name: Probe engine creation and stage exact release bytes
+      - name: Set up Dart for the consumer smoke test
+        uses: dart-lang/setup-dart@2286a0c042b44434fe26d292bbce8d34f7ec662b # v1
+        with:
+          sdk: 3.12.0
+
+      - name: Test the consumer hook, probe the engine, and stage the verified bytes
         shell: bash
         run: |
           set -euo pipefail
@@ -100,6 +106,7 @@ jobs:
             windows-*) library='${{ runner.temp }}/audio-aec-native/aec_ffi.dll' ;;
             *) echo 'unsupported target' >&2; exit 1 ;;
           esac
+          '${{ matrix.python }}' packages/audio_aec/tool/verify_hook.py --library "$library"
           '${{ matrix.python }}' packages/audio_aec/tool/prebuilt_release.py stage \
             --target '${{ matrix.target }}' \
             --library "$library" \
