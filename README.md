@@ -194,7 +194,9 @@ complete contracts, test boundaries, and publication flow.
 ./tool/publish_dry_run.sh
 ```
 
-The workspace currently targets Flutter 3.44 and Dart 3.12.
+The workspace targets Flutter 3.44 and Dart 3.12. It pins the FluidAudio
+development revision needed by the adapter. To work on the engine locally,
+override `fluidaudio_dart` with a path in the root `pubspec_overrides.yaml`.
 
 ## Releases
 

@@ -10,3 +10,4 @@ pubspec.lock
 **/GeneratedPluginRegistrant.*
 **/ephemeral/
 *.iml
+/pubspec_overrides.yaml
