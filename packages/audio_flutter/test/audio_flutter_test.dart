@@ -384,57 +384,6 @@ void main() {
     await session.close();
   });
 
-  test('system capture forwards both process and bundle selections', () async {
-    final _FakeAudioPlatform platform = _FakeAudioPlatform(captureInfo);
-    addTearDown(platform.close);
-    final AudioSourceSession session = await FlutterAudioCaptureSource(
-      FlutterAudioCaptureConfig(
-        type: AudioCaptureType.systemAudio,
-        format: format,
-        processIds: <int>[42, 43],
-        bundleIds: <String>['com.example.meeting'],
-      ),
-      platform: platform,
-    ).prepare();
-
-    expect(platform.lastCaptureRequest?.processIds, <int>[42, 43]);
-    expect(platform.lastCaptureRequest?.bundleIds, <String>[
-      'com.example.meeting',
-    ]);
-    // Naming an application is enough on its own: a platform that taps by
-    // identity needs no process to have been resolved first.
-    expect(
-      FlutterAudioCaptureConfig(
-        type: AudioCaptureType.systemAudio,
-        format: format,
-        bundleIds: <String>['com.example.meeting'],
-      ).processIds,
-      isEmpty,
-    );
-    await session.close();
-  });
-
-  test('capture rejects blank or repeated bundle IDs', () {
-    expect(
-      () => FlutterAudioCaptureConfig(
-        type: AudioCaptureType.systemAudio,
-        format: format,
-        bundleIds: <String>['  '],
-      ),
-      throwsArgumentError,
-    );
-    // Case is not identity here: the platform matches bundle IDs
-    // case-insensitively, so two spellings would tap the same app twice.
-    expect(
-      () => FlutterAudioCaptureConfig(
-        type: AudioCaptureType.systemAudio,
-        format: format,
-        bundleIds: <String>['com.example.meeting', 'com.example.Meeting'],
-      ),
-      throwsArgumentError,
-    );
-  });
-
   test('input devices stay provider-neutral and preserve stable IDs', () async {
     final _FakeAudioPlatform platform = _FakeAudioPlatform(captureInfo)
       ..inputDevices = const <PlatformAudioInputDevice>[
@@ -642,7 +591,6 @@ final class _FakeAudioPlatform extends AudioFlutterPlatform {
   List<PlatformAudioFrame> framesOnGracefulStop = const <PlatformAudioFrame>[];
   List<PlatformAudioInputDevice> inputDevices =
       const <PlatformAudioInputDevice>[];
-  PlatformCaptureRequest? lastCaptureRequest;
   PlatformPcmFormat? playbackFormat;
   final List<List<PlatformAudioFrame>> playbackWrites =
       <List<PlatformAudioFrame>>[];
@@ -663,7 +611,6 @@ final class _FakeAudioPlatform extends AudioFlutterPlatform {
     PlatformCaptureRequest request,
   ) async {
     onPrepareCapture?.call();
-    lastCaptureRequest = request;
     return captureInfo;
   }
 

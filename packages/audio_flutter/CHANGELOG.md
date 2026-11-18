@@ -1,27 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
-- Add `AudioCaptureHealthCodes`: shared constants for the capture health
-  codes the darwin supervision loops emit, so hosts stop hand-copying the
-  string literals. A contract test greps the darwin Swift sources for every
-  constant, failing the suite if either side renames.
-
-## 0.3.0
-
-- Add `FlutterAudioCaptureConfig.bundleIds`: application bundle IDs to capture
-  by durable identity instead of a process list frozen at start. Platforms
-  that can tap by identity (macOS 26+) do exactly that; the rest re-resolve
-  the IDs to processes whenever they build a capture chain.
-- `FlutterCaptureBackend` derives the bundle-ID set for a source during probe,
-  so an authorized capture targets the application family rather than the
-  single process the user happened to pick.
-- Add `SystemAudioProcessSelector.expandBundleIds`, the bundle-namespace
-  companion to `expand` for hosts that pass durable bundle identities through
-  `bundleIds`.
-- Requires `audio_flutter_darwin` 0.3.0, whose supervision rework emits new
-  capture health codes hosts can match on — see that changelog for the codes,
-  their fatal/non-fatal split, and the wire-format note.
+- Update repository and issue links for the move to the concepta.dev publisher.
 
 ## 0.2.0
 
@@ -75,15 +56,6 @@
 - Document in the README that Apple platforms still require the host app's
   `Info.plist` microphone usage description; the permission API added in this
   release governs the grant, not the declaration.
-- Add `FlutterCaptureBackend`, the federated implementation of `audio_core`'s
-  new `CaptureBackend` contract. Probes are single-use grants: a start must
-  present the exact request/source pair that was probed, and the source is
-  revalidated immediately before native allocation.
-- Expose monotonic timing on prepared capture sessions: `timingQuality` and
-  the `timing` mapping established by the first delivered frame, plus optional
-  `logicalSourceId` and `timingQuality` overrides on the session config, so a
-  host can carry a normalized source identity and timing provenance through to
-  durable track manifests.
 
 ## 0.1.0
 

@@ -80,12 +80,6 @@ abstract interface class FlutterAudioCaptureSession
     implements AudioSourceSession {
   /// Broadcast health events, including an initial prepared event.
   Stream<FlutterAudioCaptureHealth> get health;
-
-  /// How this track's timestamps were mapped to a monotonic session clock.
-  MonotonicTrackTimingQuality get timingQuality;
-
-  /// Mapping established by the first delivered frame, or null beforehand.
-  MonotonicTrackTiming? get timing;
 }
 
 /// Immutable configuration for [FlutterAudioCaptureSource].
@@ -97,13 +91,9 @@ final class FlutterAudioCaptureConfig {
     this.maxBufferedDuration = const Duration(seconds: 2),
     this.overflowPolicy = AudioCaptureOverflowPolicy.failCapture,
     List<int> processIds = const <int>[],
-    List<String> bundleIds = const <String>[],
     this.inputDeviceId,
     this.rawRecordingPath,
-    this.logicalSourceId,
-    this.timingQuality,
-  }) : processIds = List<int>.unmodifiable(processIds),
-       bundleIds = List<String>.unmodifiable(bundleIds) {
+  }) : processIds = List<int>.unmodifiable(processIds) {
     if (frameDuration <= Duration.zero) {
       throw ArgumentError.value(
         frameDuration,
@@ -133,19 +123,6 @@ final class FlutterAudioCaptureConfig {
         'Must contain unique positive process IDs.',
       );
     }
-    // Bundle IDs are matched case-insensitively by the platforms that tap by
-    // identity, so two spellings of one app are a duplicate, not two targets.
-    final Set<String> distinctBundleIds = bundleIds
-        .map((String bundleId) => bundleId.toLowerCase())
-        .toSet();
-    if (bundleIds.any((String bundleId) => bundleId.trim().isEmpty) ||
-        distinctBundleIds.length != bundleIds.length) {
-      throw ArgumentError.value(
-        bundleIds,
-        'bundleIds',
-        'Must contain unique non-empty bundle IDs.',
-      );
-    }
     if (inputDeviceId != null && inputDeviceId!.trim().isEmpty) {
       throw ArgumentError.value(
         inputDeviceId,
@@ -160,13 +137,6 @@ final class FlutterAudioCaptureConfig {
         'Must not be empty.',
       );
     }
-    if (logicalSourceId != null && logicalSourceId!.trim().isEmpty) {
-      throw ArgumentError.value(
-        logicalSourceId,
-        'logicalSourceId',
-        'Must not be empty.',
-      );
-    }
   }
 
   final AudioCaptureType type;
@@ -175,25 +145,8 @@ final class FlutterAudioCaptureConfig {
   final Duration maxBufferedDuration;
   final AudioCaptureOverflowPolicy overflowPolicy;
   final List<int> processIds;
-
-  /// Applications to capture, named by bundle ID rather than by process.
-  ///
-  /// Use it alongside or instead of [processIds]: a bundle ID keeps naming the
-  /// same app after its helpers respawn or the app itself restarts, which a
-  /// process list captured before the session started cannot. On macOS 26 the
-  /// tap targets these identities directly and survives the app's exit;
-  /// earlier versions re-resolve them to processes whenever the capture chain
-  /// is rebuilt. See [SystemAudioProcessSelector.expandBundleIds] for turning
-  /// a user's app choice into this list.
-  final List<String> bundleIds;
   final String? inputDeviceId;
   final String? rawRecordingPath;
-
-  /// Optional normalized source ID exposed by the prepared session.
-  final String? logicalSourceId;
-
-  /// Optional override for the platform-reported timestamp quality.
-  final MonotonicTrackTimingQuality? timingQuality;
 }
 
 /// Two-phase microphone or system-audio source backed by the federated plugin.
@@ -233,7 +186,6 @@ final class FlutterAudioCaptureSource implements AudioSource {
               PlatformCaptureOverflowPolicy.failCapture,
           },
           processIds: config.processIds,
-          bundleIds: config.bundleIds,
           inputDeviceId: config.inputDeviceId,
           rawRecordingPath: config.rawRecordingPath,
         ),
@@ -261,9 +213,6 @@ final class FlutterAudioCaptureSource implements AudioSource {
         platform: _platform,
         info: info,
         format: preparedFormat,
-        logicalSourceId: config.logicalSourceId,
-        timingQuality:
-            config.timingQuality ?? _captureTimingQuality(info.timingQuality),
       );
     } catch (error, stackTrace) {
       // Preparation already allocated a native session. Cancellation must not
@@ -314,10 +263,7 @@ final class _FlutterAudioCaptureSession implements FlutterAudioCaptureSession {
     required this._platform,
     required this._info,
     required this.format,
-    required String? logicalSourceId,
-    required this.timingQuality,
-  }) : _sourceId = logicalSourceId ?? _info.sourceId,
-       _status = AudioSessionStatus(
+  }) : _status = AudioSessionStatus(
          state: AudioSessionState.prepared,
          timestamp: Duration.zero,
        ) {
@@ -333,14 +279,9 @@ final class _FlutterAudioCaptureSession implements FlutterAudioCaptureSession {
 
   final AudioFlutterPlatform _platform;
   final PlatformCaptureSessionInfo _info;
-  final String _sourceId;
 
   @override
   final AudioFormat format;
-
-  @override
-  final MonotonicTrackTimingQuality timingQuality;
-  MonotonicTrackTiming? _timing;
   final StreamController<AudioFrame> _frames = StreamController<AudioFrame>();
   late final Stream<AudioFrame> _frameStream = AudioFrameStream(
     _frames.stream,
@@ -396,10 +337,7 @@ final class _FlutterAudioCaptureSession implements FlutterAudioCaptureSession {
       }, isBroadcast: true);
 
   @override
-  String get sourceId => _sourceId;
-
-  @override
-  MonotonicTrackTiming? get timing => _timing;
+  String get sourceId => _info.sourceId;
 
   @override
   AudioSessionStatus get status => _status;
@@ -496,7 +434,6 @@ final class _FlutterAudioCaptureSession implements FlutterAudioCaptureSession {
           if (_frames.isClosed) {
             return;
           }
-          _establishTiming(frame);
           _frames.add(
             AudioFrame.owned(
               format: format,
@@ -524,31 +461,6 @@ final class _FlutterAudioCaptureSession implements FlutterAudioCaptureSession {
         _requestFrameClose();
       }
     }
-  }
-
-  void _establishTiming(PlatformAudioFrame frame) {
-    if (_timing != null) {
-      return;
-    }
-    if (frame.timestamp.isNegative) {
-      throw AudioFailure(
-        code: 'platform_capture_timing_invalid',
-        stage: AudioFailureStage.capture,
-        message: 'The platform returned a negative monotonic timestamp.',
-        retryable: false,
-      );
-    }
-    _timing = MonotonicTrackTiming(
-      trackId: trackId,
-      clockId: clockId,
-      sessionClockId: timingQuality == MonotonicTrackTimingQuality.synthesized
-          ? '$clockId.session.${_info.sessionId}'
-          : clockId,
-      sampleRate: format.sampleRate,
-      startOffset: frame.timestamp,
-      firstSampleOffset: frame.sampleOffset,
-      quality: timingQuality,
-    );
   }
 
   @override
@@ -887,17 +799,6 @@ AudioDiscontinuity? _discontinuity(PlatformAudioFrame frame) {
     },
   );
 }
-
-MonotonicTrackTimingQuality _captureTimingQuality(
-  PlatformCaptureTimingQuality quality,
-) => switch (quality) {
-  PlatformCaptureTimingQuality.nativeMapped =>
-    MonotonicTrackTimingQuality.nativeMapped,
-  PlatformCaptureTimingQuality.synchronized =>
-    MonotonicTrackTimingQuality.synchronized,
-  PlatformCaptureTimingQuality.synthesized =>
-    MonotonicTrackTimingQuality.synthesized,
-};
 
 AudioFailure _captureFailure(
   Object error, {
