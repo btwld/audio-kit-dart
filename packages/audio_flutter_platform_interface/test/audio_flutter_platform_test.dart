@@ -16,12 +16,6 @@ void main() {
         isEmpty,
       );
       expect(await AudioFlutterPlatform.instance.listAudioProcesses(), isEmpty);
-      final PlatformCaptureBackendInfo backend = await AudioFlutterPlatform
-          .instance
-          .captureBackendInfo();
-      expect(backend.backendId, 'audio_flutter.unsupported');
-      expect(backend.sourceKinds, isEmpty);
-      expect(await AudioFlutterPlatform.instance.listCaptureSources(), isEmpty);
       expect(
         () => AudioFlutterPlatform.instance.prepareCapture(
           const PlatformCaptureRequest(
@@ -54,25 +48,6 @@ void main() {
       );
     },
   );
-
-  test('capture requests carry application identity beside process IDs', () {
-    const PlatformCaptureRequest processOnly = PlatformCaptureRequest(
-      kind: PlatformCaptureKind.systemAudio,
-      outputFormat: PlatformPcmFormat(sampleRate: 16000, channelCount: 1),
-      processIds: <int>[42],
-    );
-    const PlatformCaptureRequest identified = PlatformCaptureRequest(
-      kind: PlatformCaptureKind.systemAudio,
-      outputFormat: PlatformPcmFormat(sampleRate: 16000, channelCount: 1),
-      bundleIds: <String>['com.example.meeting'],
-    );
-
-    // A request written against the older contract still means what it meant:
-    // no identities, so the process list alone decides what is captured.
-    expect(processOnly.bundleIds, isEmpty);
-    expect(identified.processIds, isEmpty);
-    expect(identified.bundleIds, <String>['com.example.meeting']);
-  });
 
   test('platform frames report continuity only when it broke', () {
     final PlatformAudioFrame continuous = PlatformAudioFrame(

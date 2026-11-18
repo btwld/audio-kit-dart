@@ -2,10 +2,7 @@
 
 ## 0.2.1
 
-- Add optional `PlatformCaptureRequest.bundleIds`: application bundle IDs a
-  capture targets by durable identity, surviving helper respawns and app
-  relaunches. Defaults to empty; platforms with no application identity
-  ignore it. Additive — existing implementations are unaffected.
+- Update repository and issue links for the move to the concepta.dev publisher.
 
 ## 0.2.0
 
@@ -26,15 +23,6 @@
   and `firstAudioAtMillis` to `PlatformAudioSessionEvent`. They separate a
   silent room from a dead tap, and a device that never ran from one that runs
   and delivers zeroes.
-- Add `captureBackendInfo()` and `listCaptureSources()` with
-  `PlatformCaptureBackendInfo`, `PlatformCaptureSourceInfo`, and the
-  `PlatformCaptureSourceKind`, `PlatformCaptureSourceAvailability`, and
-  `PlatformCaptureCapability` enums — normalized capture discovery consumed by
-  `audio_flutter`'s new `FlutterCaptureBackend`. Both carry
-  `UnimplementedError` default bodies.
-- Add `PlatformCaptureTimingQuality` and `timingQuality` on capture session
-  info, so platforms report whether track timestamps are native-mapped,
-  synchronized, or synthesized.
 
 ## 0.1.0
 
