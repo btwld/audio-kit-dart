@@ -351,7 +351,8 @@ void main() {
       addTearDown(provider.close);
 
       await expectLater(
-        // One sample below the one-second minimum at 16 kHz.
+        // 15,999 samples: one short of the 16,000 the Swift oracle requires at
+        // 16 kHz.
         provider.transcribe(
           BatchRecognitionRequest(audio: FakeAudioSource(tone(15999))),
         ),
