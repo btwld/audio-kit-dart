@@ -1,7 +1,7 @@
 # sherpa_onnx_macos compatibility package
 
 This private workspace package replaces the `sherpa_onnx_macos` 1.13.4
-platform package during Audio Kit and Concepta Copilot development. It keeps
+platform package for local builds targeting macOS 12. It keeps
 the upstream Dart API unchanged while providing universal ONNX Runtime and
 Sherpa dylibs whose arm64 and x86_64 slices both target macOS 12.0.
 

@@ -1,7 +1,6 @@
 # Releasing Audio Kit
 
-Audio Kit is a pub workspace, but every package under `packages/` is a separate
-pub.dev package. All package manifests use hosted constraints; workspace
+Audio Kit is a pub workspace, with independently versioned public packages. All package manifests use hosted constraints; workspace
 resolution selects the matching local members during development.
 
 ## First publication
@@ -24,39 +23,11 @@ pub.dev before publishing a dependent package:
    `speech_deepgram`, `speech_openai_tts`, `speech_fluidaudio`, `speech_mlx`
 4. `voice_flutter`
 
-This is the same order `tool/publish_dry_run.sh` iterates; keep the two in
-sync. Four of those packages are at `0.1.0` but have never been
-published: `audio_flutter_linux`, `audio_flutter_windows`, `audio_aec`, and
-`speech_sherpa`. A fifth workspace member, `sherpa_onnx_macos`, is permanently
-unpublished (`publish_to: none`): it is a private macOS 12-compatible binary
-override for `sherpa_onnx` and is deliberately absent from the publish order
-and from `tool/publish_dry_run.sh`.
+The private `sherpa_onnx_macos` override and example applications use
+`publish_to: none`. Only publish packages listed in `tool/publish_dry_run.sh`.
 
-The [conversation-kit-dart](https://github.com/kshdotdev/conversation-kit-dart)
-packages (`speech_pipeline`, `turn_detection`, `transcript_kit`, `meeting_kit`,
-`conversation_core`) are **internal and never published**. All five carry
-`publish_to: none`; that repository has no publish workflows and no release
-tags, and applications consume it as path dependencies from a side-by-side
-kshdotdev checkout. Nothing in this repository's release order waits on it, and
-nothing there waits on a tag here — it only needs the hosted `audio_core`,
-`audio_processing`, and `speech_core` contracts it compiles against to exist,
-which is a development concern rather than a release one.
-
-Two already-published packages are blocked behind the four unpublished ones
-above and cannot be re-released until their new dependencies are live on pub.dev
-at a stable version and the prerelease constraints are widened to `^0.1.0`:
-
-- `audio_flutter` depends on `audio_flutter_linux` and `audio_flutter_windows`;
-- `voice_flutter` depends on `audio_aec`.
-
-A tag pushed for either before that point fails the preflight, which copies the
-package outside the workspace and resolves it against pub.dev only.
-
-The adapter prerequisites must already be public at the versions required by
-their manifests:
-
-- `fluidaudio_dart` `^0.3.1`
-- `mlx_audio` `^0.2.0`
+All hosted dependencies, including the adapter engines and any newly added
+workspace dependencies, must exist on pub.dev at compatible versions.
 
 Publish one package with:
 
@@ -70,11 +41,12 @@ credential exists.
 
 ## Enable trusted publishing
 
-After a package exists:
+After a first publication, open the package’s Admin tab and transfer it to
+[concepta.dev](https://pub.dev/publishers/concepta.dev). To enable automated releases:
 
 1. Open `https://pub.dev/packages/<package>/admin`.
 2. Enable GitHub Actions publishing.
-3. Set repository to `kshdotdev/audio-kit-dart`.
+3. Set repository to `btwld/audio-kit-dart`.
 4. Set tag pattern to `<package>-v{{version}}`.
 5. Require the GitHub environment `pub.dev`.
 

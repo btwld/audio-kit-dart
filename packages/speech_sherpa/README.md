@@ -68,19 +68,16 @@ not been evaluated here. Streaming buys latency by decoding with a fixed chunk
 and a bounded left context — it cannot revise a word once the encoder has moved
 past it, and it is a smaller English-only model besides. If a transcript is
 produced after the fact, batch remains the better answer; if you need words on
-screen while someone is speaking, this is the path. The alternative for the
-in-between case is `speech_pipeline` (in the sibling
-[conversation-kit-dart](https://github.com/kshdotdev/conversation-kit-dart)
-repository), which cuts rolling windows and gives a live transcript from any
-batch provider at higher latency and batch accuracy.
+screen while someone is speaking, this is the path. Applications can also
+send rolling windows to a batch recognizer when higher latency is acceptable.
 
 *The endpointer is rule-based, not semantic.* `enableEndpoint` runs sherpa's
 three silence rules — trailing silence before speech, trailing silence after
 speech, and a maximum utterance length — over decoder state. It decides where
 one confirmed segment ends. It cannot tell a thinking pause from a finished
 thought, so it is not an end-of-utterance model, and it must not be used to
-decide that a speaker has yielded the turn. `speech_pipeline` and dedicated EOU
-providers remain the answer there; the rules are tunable through
+decide that a speaker has yielded the turn. Use a dedicated end-of-utterance
+provider for turn detection. Configure the silence rules through
 `SherpaStreamingRecognitionOptions`.
 
 ## Platforms

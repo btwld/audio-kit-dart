@@ -114,5 +114,5 @@ redistribution of a library built by tool/build_native.sh. That build also
 statically links Abseil (https://github.com/abseil/abseil-cpp, Apache License
 2.0) from the upstream meson wrap, so a redistributed binary needs Abseil's
 notice as well. Because this package does not currently ship a binary — see
-"Native library (risk R4)" in the README — that obligation falls on whoever
+"Native library" in the README — that obligation falls on whoever
 builds and distributes one.

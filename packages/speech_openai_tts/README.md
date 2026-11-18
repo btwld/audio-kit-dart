@@ -18,5 +18,5 @@ final tokenSource = StaticOpenAiTokenSource(
 Credentials are injected through token sources, transport operations are
 cancellable, and HTTP/provider failures map to stable `SpeechFailure` values.
 
-See the [Audio Kit repository](https://github.com/kshdotdev/audio-kit-dart)
+See the [Audio Kit repository](https://github.com/btwld/audio-kit-dart)
 for voice orchestration examples.

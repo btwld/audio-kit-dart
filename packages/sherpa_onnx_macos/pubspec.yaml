@@ -3,7 +3,7 @@ description: Private macOS 12-compatible native binary override for sherpa_onnx.
 version: 1.13.4+concepta.1
 publish_to: none
 resolution: workspace
-repository: https://github.com/kshdotdev/audio-kit-dart
+repository: https://github.com/btwld/audio-kit-dart
 
 environment:
   sdk: ^3.12.0

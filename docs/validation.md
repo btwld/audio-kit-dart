@@ -5,7 +5,6 @@
 From the Audio Kit workspace:
 
 ```sh
-cd /Users/kauan/Projects/kshdotdev/audio-kit-dart
 ./tool/verify.sh
 ```
 
@@ -23,31 +22,6 @@ git diff --check
 ```
 
 The intended toolchain is Flutter 3.44 with Dart 3.12.
-
-## Verified snapshot
-
-The implementation was last verified on 2026-07-26 with Flutter 3.44.0 and
-Dart 3.12.0:
-
-| Scope | Result |
-|---|---|
-| Audio Kit workspace | `flutter analyze` clean; 211/211 deterministic tests passed |
-| Flutter Ectos app | `flutter analyze lib test` clean; 362/362 tests passed |
-| Flutter Ectos macOS host | Debug build succeeded and produced `ectos.app` |
-| `fluidaudio_dart` | `flutter analyze` clean; 25/25 tests passed |
-| `mlx_audio` core package | 204/204 tests passed |
-| `mlx_audio` package | 215/215 default tests passed, including 9 explicitly gated real-checkpoint skips |
-| Repository hygiene | Dart formatting and changed-file whitespace checks passed |
-
-The Ectos repository contains the copied `references/audio-sdk` research tree
-and incomplete plugin examples. A whole-repository analysis therefore reports
-issues outside the app target; the verified app gate intentionally scopes
-analysis to `lib` and `test`. The macOS build emitted only existing Metal
-search-path and future Swift Package Manager migration warnings.
-
-The MLX counts above describe the default suite. The nine skipped tests are not
-claimed as real-model passes; use the opt-in commands below on Apple Silicon
-with the required checkpoints.
 
 ## Focused checks
 
@@ -70,73 +44,24 @@ transports, HTTP transports, and token sources unless an integration command
 explicitly says otherwise. Passing them proves the adapter contract and
 lifecycle, not the availability of a remote service or local model checkpoint.
 
-## Ectos application
+## Desktop host
 
-The migrated app is a concrete macOS host for the federated plugin and graph
-composition:
+The example application exercises the federated plugin in a Flutter host.
+On macOS, build it from the workspace root with:
 
 ```sh
-cd /Users/kauan/Projects/kshdotdev/flutter-app
-flutter pub get
-flutter analyze lib test
-flutter test
+cd packages/audio_flutter/example
 flutter build macos --debug
 ```
 
-The build checks native macOS registration and compilation. Tests should cover
-the graph-backed provider defaults, selected input device, custom vocabulary,
-process targeting, recording paths, startup ordering, and failure cleanup.
-
-An iOS host that path-depends on `audio_flutter` should also run:
-
-```sh
-flutter build ios --simulator --no-codesign
-```
-
-This is a compile check for the shared Darwin plugin. It does not exercise
-microphone permission, devices, playback timing, or any macOS-only process tap.
-
-## Inference-engine repositories
-
-FluidAudio:
-
-```sh
-cd /Users/kauan/Projects/kshdotdev/fluidaudio-dart
-flutter pub get
-flutter analyze
-flutter test
-```
-
-MLX Audio:
-
-```sh
-cd /Users/kauan/Projects/kshdotdev/mlx
-make setup
-dart analyze
-make test
-```
-
-These default commands do not imply that large real-model suites ran.
+The desktop CI jobs also build this example on Linux and Windows. Live audio
+capture requires a device or a configured audio server on the target platform.
 
 ## Opt-in real integration
 
-Real FluidAudio inference requires a macOS device and model assets:
-
-```sh
-cd /Users/kauan/Projects/kshdotdev/fluidaudio-dart/example
-flutter test integration_test/plugin_integration_test.dart -d macos
-FLUIDAUDIO_RUN_MODELS=1 \
-  flutter test integration_test/real_models_test.dart -d macos
-```
-
-MLX checkpoint tests are tagged and skipped by default because they may
-download large assets and require Apple Silicon:
-
-```sh
-cd /Users/kauan/Projects/kshdotdev/mlx/packages/mlx_audio
-dart test -t e2e --run-skipped
-dart test -t weights --run-skipped
-```
+The adapter packages document their model and hardware requirements. In
+`packages/speech_mlx`, enable `SPEECH_MLX_WEIGHTS_TESTS=1` on Apple Silicon
+to run the real-checkpoint test with its required assets.
 
 Deepgram and OpenAI adapter tests do not call production endpoints. A real
 cloud smoke test must inject renewable credentials, use a non-sensitive audio

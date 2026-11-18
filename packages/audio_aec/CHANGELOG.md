@@ -37,7 +37,7 @@
 - Add `tool/build_native.sh`, which builds the native library from
   webrtc-audio-processing v2.1 at a pinned revision into a gitignored `.native/`
   directory. No WebRTC source is vendored.
-- **Resolve risk R4 (native distribution) in favour of build hooks.** See
+- **Use build hooks for native library distribution.** See
   `doc/DISTRIBUTION.md` for the decision matrix, the measurements, and the
   migration steps.
   - Add `hook/build.dart`: registers the native library as a code asset from a

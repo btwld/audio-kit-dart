@@ -19,5 +19,5 @@ This package has no Flutter or provider SDK dependency. Use
 fan-out and [`audio_processing`](https://pub.dev/packages/audio_processing)
 for PCM transforms.
 
-See the [Audio Kit repository](https://github.com/kshdotdev/audio-kit-dart)
+See the [Audio Kit repository](https://github.com/btwld/audio-kit-dart)
 for architecture and lifecycle documentation.

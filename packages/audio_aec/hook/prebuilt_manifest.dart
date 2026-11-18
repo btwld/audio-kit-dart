@@ -35,7 +35,7 @@ String _extension(String os) => switch (os) {
 /// native ABI release in [artifactVersion], rather than `latest`, because a
 /// build hook that silently picks up a new binary is not reproducible.
 const String defaultUrlBase =
-    'https://github.com/kshdotdev/audio-kit-dart/releases/download/'
+    'https://github.com/btwld/audio-kit-dart/releases/download/'
     'audio_aec-native-v$artifactVersion';
 
 /// Release tag component of [defaultUrlBase].

@@ -30,5 +30,5 @@ File-backed WAV recording is opt-in because it uses `dart:io`:
 import 'package:audio_processing/audio_processing_io.dart';
 ```
 
-See the [Audio Kit repository](https://github.com/kshdotdev/audio-kit-dart)
+See the [Audio Kit repository](https://github.com/btwld/audio-kit-dart)
 for pipeline examples.

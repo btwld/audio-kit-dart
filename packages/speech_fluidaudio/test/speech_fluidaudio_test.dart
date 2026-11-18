@@ -23,7 +23,7 @@ void main() {
             inputFormat: mono16k,
             options: SpeechRecognitionOptions(
               languageTag: 'en-US',
-              vocabulary: <String>['Ectos'],
+              vocabulary: <String>['Opus'],
               providerOptions: FluidRecognitionOptions(
                 source: FluidRecognitionSource.systemAudio,
                 vocabulary: <FluidVocabularyEntry>[
@@ -43,7 +43,7 @@ void main() {
           runtime.lastStreamingConfiguration.vocabulary.map(
             (entry) => entry.text,
           ),
-          <String>['FluidAudio', 'Ectos'],
+          <String>['FluidAudio', 'Opus'],
         );
 
         final events = <SpeechRecognitionEvent>[];
@@ -806,8 +806,7 @@ void main() {
       final runtime = _FakeRuntime();
       final source = _FiniteAudioSource(
         format: mono16k,
-        // 15,999 samples: one short of the guard, which the Swift oracle
-        // enforces as 16,000 samples at 16 kHz.
+        // One sample below the one-second minimum at 16 kHz.
         samples: recognizableSamples(count: 15999),
       );
       final provider = FluidAudioSpeechProvider(runtime: runtime);
@@ -1103,11 +1102,11 @@ void main() {
       final provider = FluidAudioSpeechProvider(runtime: runtime);
 
       await provider.addRule(
-        InverseTextNormalizationRule(spoken: 'ectos', written: 'Ectos'),
+        InverseTextNormalizationRule(spoken: 'opus', written: 'Opus'),
       );
 
       expect(runtime.lastItn.rules, <({String spoken, String written})>[
-        (spoken: 'ectos', written: 'Ectos'),
+        (spoken: 'opus', written: 'Opus'),
       ]);
       await provider.close();
     });

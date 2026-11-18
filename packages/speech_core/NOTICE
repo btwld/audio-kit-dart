@@ -30,9 +30,3 @@ Adapted files:
     from packages/cc_domain/lib/core/domain/services/cosine_similarity.dart
     The cosine-similarity kernel is unchanged, with the length check replaced
     by an embedding-space check and the result clamped to the cosine range.
-
-The voice-profile matcher that used to sit here (VoiceProfile, bestVoiceMatch,
-blendCentroid and friends, adapted from cc_domain's voice_profile_matching.dart)
-moved to transcript_kit in the sibling conversation-kit-dart workspace before
-this package released it; its attribution travels with it in that package's
-NOTICE.

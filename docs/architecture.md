@@ -60,11 +60,8 @@ route carries exactly the rate the model consumes.
 is a cosine *similarity* despite the name: agglomerative clustering merges when
 `cos_sim >= threshold`, so a higher value separates more strictly and produces
 more speakers. FluidAudio's library default is 0.6 and this adapter keeps it.
-Swift Ectos ran stricter — 0.65, user-adjustable across 0.40–0.85 — biasing
-toward over-splitting on purpose, because merging two speakers in a UI is easy
-and recovering an embedding already polluted by a bad merge is not. Apps should
-set the threshold deliberately rather than inherit 0.6 by silence; the right
-value depends on whether the app can merge speakers after the fact.
+Applications that can merge speaker labels after transcription may prefer a
+higher threshold to reduce the risk of combining distinct speakers.
 
 ## Audio frames and source streams
 
@@ -327,9 +324,8 @@ fan the same synthesized frames into recording, metering, or analysis sinks.
 
 ## Current limitations
 
-- Flutter transport is Darwin-only today; Android, Windows, and Linux platform
-  implementations are absent.
-- System/process capture is macOS-only and requires macOS 14.4.
+- Flutter transport has Darwin, Linux, and Windows implementations.
+  On macOS, system and per-process capture require macOS 14.4 or later.
 - MLX inference is Apple-Silicon-only.
 - Native capture restart/drop metadata currently reaches Dart as a dropped
   range; a distinct native `sourceRestart` reason is not transported yet.
@@ -338,22 +334,8 @@ fan the same synthesized frames into recording, metering, or analysis sinks.
   native-library distribution story is still being decided.
 - The graph is implemented in Dart. FluidAudio-specific fused native routing
   is deferred until profiling justifies it.
-- All packages use hosted constraints and are consumed hosted by Ectos (no
-  path dependencies), but not all of them are on pub.dev yet. The 13 original
-  packages are published at `0.1.0`. The four newer packages —
-  `audio_flutter_linux`, `audio_flutter_windows`, `audio_aec`, and
-  `speech_sherpa` — are unpublished at `0.1.0`, pending their first
-  release. Until then their dependents (`audio_flutter` on the two platform
-  implementations, `voice_flutter` on `audio_aec`) resolve only inside this
-  workspace and cannot be re-released.
-- The conversation and meeting intelligence packages (`speech_pipeline`,
-  `turn_detection`, `transcript_kit`, `meeting_kit`, and `conversation_core`)
-  have moved to the sibling
-  [conversation-kit-dart](https://github.com/kshdotdev/conversation-kit-dart)
-  repository. They consume this workspace's contracts; nothing here depends on
-  them. That repository is internal: all five are `publish_to: none` and never
-  reach pub.dev, so applications take them as path dependencies. This
-  workspace's release order is independent of them.
+- Packages resolve together in the development workspace. Before releasing a
+  package, verify its dependencies resolve independently from pub.dev.
 
 See [validation](validation.md) for what the default test suite does and does
 not exercise.

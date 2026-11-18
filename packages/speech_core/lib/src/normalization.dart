@@ -9,7 +9,7 @@ final class InverseTextNormalizationRule {
     requireNonEmpty(spoken, 'spoken');
   }
 
-  /// Spoken form the provider should recognize, such as `ectos`.
+  /// Spoken form the provider should recognize, such as `kilohertz`.
   final String spoken;
 
   /// Written form to substitute. Empty removes the spoken form entirely.

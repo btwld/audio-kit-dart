@@ -42,5 +42,5 @@ hub.router.events.listen((event) {
 Subscribe before `start`, so a route that fails during startup is still seen.
 `AudioRouteGap` on the same stream reports frames an overflow policy discarded.
 
-See the [Audio Kit repository](https://github.com/kshdotdev/audio-kit-dart)
+See the [Audio Kit repository](https://github.com/btwld/audio-kit-dart)
 for overflow policies and lifecycle guarantees.

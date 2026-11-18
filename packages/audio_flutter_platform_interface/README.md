@@ -10,5 +10,5 @@ Application code should normally depend on
 Platform implementations depend on this package when implementing another
 operating system backend.
 
-See the [federated implementation](https://github.com/kshdotdev/audio-kit-dart/tree/main/packages/audio_flutter_darwin)
+See the [federated implementation](https://github.com/btwld/audio-kit-dart/tree/main/packages/audio_flutter_darwin)
 for a complete Apple backend.

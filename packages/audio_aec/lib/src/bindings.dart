@@ -4,7 +4,7 @@
 //
 // Adaptation notes: Control Center resolves every native from an application
 // support directory populated by out-of-band build scripts, which a published
-// package cannot do (risk R4). The candidate policy here is therefore explicit
+// package cannot do. The candidate policy here is therefore explicit
 // path -> environment variable -> conventional locations beside the executable,
 // and the failure is a structured [AecUnavailable] carrying the paths actually
 // tried. The raw symbol surface is otherwise unchanged, because the C ABI is.
@@ -71,7 +71,7 @@ final class AecUnavailable implements Exception {
       '\n  audio_aec does not ship a binary: build one with '
       'packages/audio_aec/tool/build_native.sh and point '
       '$aecLibraryEnvironmentVariable at the result, or pass an explicit '
-      'libraryPath. See the package README, "Native library (risk R4)".',
+      'libraryPath. See the package README, "Native library".',
     );
     return buffer.toString();
   }
@@ -82,7 +82,7 @@ final class AecUnavailable implements Exception {
 /// Everything above this seam — [AecProcessor], and the filter that composes
 /// it — is written against this interface, so the whole stack is exercisable
 /// with an in-Dart fake and no native library present. That matters more here
-/// than in most FFI packages: the library is not distributed (risk R4), so a
+/// than in most FFI packages: the library is not distributed, so a
 /// test suite that required it would be a test suite nobody can run.
 ///
 /// The interface is deliberately pointer-level rather than list-level. Keeping
