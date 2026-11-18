@@ -1,11 +1,15 @@
 # Changelog
 
-## 0.2.1
+## 0.2.2
 
 - Add optional `PlatformCaptureRequest.bundleIds`: application bundle IDs a
   capture targets by durable identity, surviving helper respawns and app
   relaunches. Defaults to empty; platforms with no application identity
   ignore it. Additive — existing implementations are unaffected.
+
+## 0.2.1
+
+- Update repository and issue links for the move to the concepta.dev publisher.
 
 ## 0.2.0
 

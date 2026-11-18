@@ -13,6 +13,10 @@
   terminal state can trust the sinks. An explicit `abort()` still tears down
   immediately and discards queued frames.
 
+## 0.1.1
+
+- Update repository and issue links for the move to the concepta.dev publisher.
+
 ## 0.1.0
 
 - Initial public release.

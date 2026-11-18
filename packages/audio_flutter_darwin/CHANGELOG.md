@@ -44,6 +44,10 @@
 - The unclocked-aggregate fallback no longer reports a `clockDeviceUid` it
   does not have.
 
+## 0.2.1
+
+- Update repository and issue links for the move to the concepta.dev publisher.
+
 ## 0.2.0
 
 - Implement `microphonePermissionStatus()` and `requestMicrophonePermission()`

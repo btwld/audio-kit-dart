@@ -23,6 +23,10 @@
   capture health codes hosts can match on — see that changelog for the codes,
   their fatal/non-fatal split, and the wire-format note.
 
+## 0.2.1
+
+- Update repository and issue links for the move to the concepta.dev publisher.
+
 ## 0.2.0
 
 - Add `SystemAudioProcessSelector`, a pure expansion of a target app set over a
