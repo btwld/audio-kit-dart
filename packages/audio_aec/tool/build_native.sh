@@ -95,6 +95,10 @@ cp "$SHIM" "$SRC/aec_ffi.cc"
 cat "$PKG_ROOT/native/shim.meson" >> "$SRC/meson.build"
 options=(--buildtype=release --default-library=static --force-fallback-for=abseil-cpp)
 if [ "$NATIVE_OS" = Windows ]; then
+  require_cmd cl "Load the x64 Visual Studio developer environment."
+  # Git Bash prepends its Unix utilities, including an unrelated link.exe.
+  # Meson and Ninja must see the MSVC linker in the same directory as cl.exe.
+  export PATH="$(dirname "$(command -v cl)"):$PATH"
   export CC=cl CXX=cl
   options+=(-Db_vscrt=mt)
 fi
