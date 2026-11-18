@@ -12,37 +12,27 @@ from this workspace so applications can compose only the layers they need.
 
 | Package | Responsibility |
 |---|---|
-| `audio_core` | Owned float32 PCM frames, immutable formats and timelines, cancellation, failures, and two-phase source/sink sessions |
-| `audio_kit_graph` | `AudioHub`, dynamic N-way fan-out, independently bounded route mailboxes, overflow policies, isolation, metrics, drain, and abort |
-| `audio_processing` | Stateful resampling, downmixing, rechunking, metering, explicit synchronization/mixing, in-memory WAV, segmented WAV recording with crash recovery, and opt-in `dart:io` WAV sources/sinks |
+| [`audio_core`](https://pub.dev/packages/audio_core) | Owned float32 PCM frames, immutable formats and timelines, cancellation, failures, and two-phase source/sink sessions |
+| [`audio_kit_graph`](https://pub.dev/packages/audio_kit_graph) | `AudioHub`, dynamic N-way fan-out, independently bounded route mailboxes, overflow policies, isolation, metrics, drain, and abort |
+| [`audio_processing`](https://pub.dev/packages/audio_processing) | Stateful resampling, downmixing, rechunking, metering, explicit synchronization/mixing, in-memory WAV, segmented WAV recording with crash recovery, and opt-in `dart:io` WAV sources/sinks |
 | `audio_aec` | Acoustic echo cancellation for `audio_core` streams over WebRTC AEC3 (FFI) |
-| `speech_core` | Stable provider registry, typed descriptors/options, and streaming or batch STT, TTS, VAD, EOU, and diarization contracts |
-| `audio_flutter_platform_interface` | Federated capture/playback and device-process platform messages |
-| `audio_flutter` | Provider-neutral Flutter microphone/system capture, device discovery, permissions, health, and PCM playback |
-| `audio_flutter_darwin` | Apple implementation with a bounded native capture pipeline, macOS process taps, playback, health, and source-native recording |
-| `audio_flutter_linux` | Linux implementation of capture and PCM playback over PulseAudio and PipeWire |
-| `audio_flutter_windows` | Windows capture with WASAPI process/system loopback, microphones, and render playback |
-| `voice_core` | Cancellable half-duplex conversation and turn orchestration, bounded serialized synthesis, stale-generation rejection, sentence segmentation, and barge-in |
-| `voice_flutter` | Graph-backed STT/VAD input and synthesized-audio output bridges, plus optional widgets driven by `voice_core` |
-| `speech_fluidaudio` | FluidAudio streaming/batch STT, VAD, EOU, batch diarization, and TTS adapter |
-| `speech_mlx` | MLX batch STT and incremental TTS over bounded, long-lived worker isolates |
-| `speech_sherpa` | Cross-platform sherpa-onnx adapter — streaming and batch STT, VAD, diarization, and speaker embeddings |
-| `speech_deepgram` | Deepgram streaming STT with renewable credentials and bounded websocket writes |
-| `speech_openai_tts` | OpenAI streaming TTS exposed as a cancellable audio source |
+| [`speech_core`](https://pub.dev/packages/speech_core) | Stable provider registry, typed descriptors/options, and streaming or batch STT, TTS, VAD, EOU, and diarization contracts |
+| [`audio_flutter_platform_interface`](https://pub.dev/packages/audio_flutter_platform_interface) | Federated capture/playback and device-process platform messages |
+| [`audio_flutter`](https://pub.dev/packages/audio_flutter) | Provider-neutral Flutter microphone/system capture, device discovery, permissions, health, and PCM playback |
+| [`audio_flutter_darwin`](https://pub.dev/packages/audio_flutter_darwin) | Apple implementation with a bounded native capture pipeline, macOS process taps, playback, health, and source-native recording |
+| [`audio_flutter_linux`](https://pub.dev/packages/audio_flutter_linux) | Linux implementation of capture and PCM playback over PulseAudio and PipeWire |
+| [`audio_flutter_windows`](https://pub.dev/packages/audio_flutter_windows) | Windows capture with WASAPI process/system loopback, microphones, and render playback |
+| [`voice_core`](https://pub.dev/packages/voice_core) | Cancellable half-duplex conversation and turn orchestration, bounded serialized synthesis, stale-generation rejection, sentence segmentation, and barge-in |
+| [`voice_flutter`](https://pub.dev/packages/voice_flutter) | Graph-backed STT/VAD input and synthesized-audio output bridges, plus optional widgets driven by `voice_core` |
+| [`speech_fluidaudio`](https://pub.dev/packages/speech_fluidaudio) | FluidAudio streaming/batch STT, VAD, EOU, batch diarization, and TTS adapter |
+| [`speech_mlx`](https://pub.dev/packages/speech_mlx) | MLX batch STT and incremental TTS over bounded, long-lived worker isolates |
+| [`speech_sherpa`](https://pub.dev/packages/speech_sherpa) | Cross-platform sherpa-onnx adapter — streaming and batch STT, VAD, diarization, and speaker embeddings |
+| [`speech_deepgram`](https://pub.dev/packages/speech_deepgram) | Deepgram streaming STT with renewable credentials and bounded websocket writes |
+| [`speech_openai_tts`](https://pub.dev/packages/speech_openai_tts) | OpenAI streaming TTS exposed as a cancellable audio source |
 | `sherpa_onnx_macos` | Private macOS 12-compatible native binary override for `sherpa_onnx` (never published) |
 
 The portable core is pure Dart. Flutter, platform-channel, native model,
 network, and provider SDK dependencies remain in integration packages.
-
-The conversation and meeting intelligence layer lives in the sibling
-[conversation-kit-dart](https://github.com/kshdotdev/conversation-kit-dart)
-workspace: `speech_pipeline`, `turn_detection`, `transcript_kit`,
-`meeting_kit`, and `conversation_core`. Those packages consume the contracts
-published here — transcript assembly, speaker identity, turn boundaries,
-question detection, dictation logic, and meeting detection are deliberately
-out of scope for this repo, which stops at audio and speech I/O and the
-provider adapters. That workspace is internal and does not publish to pub.dev;
-this repository is the published half of the stack.
 
 ## Install and compose
 
@@ -57,7 +47,6 @@ flutter pub add speech_mlx
 
 All packages share typed `audio_core` and `speech_core` boundaries. Capture and
 routing code therefore stays unchanged when a provider adapter is replaced.
-The initial public versions are released together from the same commit.
 
 ## Core guarantees
 
@@ -188,13 +177,13 @@ import `dart:io`.
   availability-guarded and remains macOS-only.
 - MLX inference requires Apple Silicon. Android capture is not implemented.
   Windows and Linux capture/playback implementations exist but are not yet
-  validated on real hardware (Windows C++ is pending its first compile on CI).
+  validated on real hardware.
   Echo cancellation (`audio_aec`) and an opt-in full-duplex voice mode are
   implemented; the AEC native library currently requires a local build.
 - Native Fluid-specific fused routing is intentionally deferred; the generic
   Dart graph is the current correctness path.
 
-See [architecture](docs/architecture.md), [Ectos migration](docs/migration.md),
+See [architecture](docs/architecture.md), [integration guide](docs/integration.md),
 [validation](docs/validation.md), and [releasing](docs/releasing.md) for the
 complete contracts, test boundaries, and publication flow.
 
@@ -205,18 +194,21 @@ complete contracts, test boundaries, and publication flow.
 ./tool/publish_dry_run.sh
 ```
 
-The workspace currently targets Flutter 3.44 and Dart 3.12.
+The workspace targets Flutter 3.44 and Dart 3.12. It pins the FluidAudio
+development revision needed by the adapter. To work on the engine locally,
+override `fluidaudio_dart` with a path in the root `pubspec_overrides.yaml`.
 
 ## Releases
 
-Every package is versioned and published independently. A release tag is the
+Each public package has its own version. A release tag is the
 package name followed by its pubspec version, for example
 `audio_core-v0.1.0`. GitHub Actions performs a clean hosted-dependency check
 before publishing with pub.dev OIDC; no long-lived publishing token is stored
 in GitHub.
 
-New packages require one manual first publication. After that, configure each
-pub.dev package with repository `kshdotdev/audio-kit-dart`, tag pattern
+After the first manual publication, transfer the package to the
+[concepta.dev publisher](https://pub.dev/publishers/concepta.dev) and configure
+trusted publishing with repository `btwld/audio-kit-dart`, tag pattern
 `<package>-v{{version}}`, and GitHub environment `pub.dev`.
 
 This project is available under the [MIT License](LICENSE).

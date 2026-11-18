@@ -6,7 +6,7 @@ Pod::Spec.new do |spec|
 Universal ONNX Runtime and sherpa-onnx dylibs rebuilt from pinned upstream
 sources with a real macOS 12.0 deployment target.
                        DESC
-  spec.homepage = 'https://github.com/kshdotdev/audio-kit-dart'
+  spec.homepage = 'https://github.com/btwld/audio-kit-dart'
   spec.license = { :file => '../LICENSE' }
   spec.author = { 'Concepta' => 'engineering@concepta.dev' }
   spec.source = { :path => '.' }

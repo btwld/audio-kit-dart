@@ -363,8 +363,7 @@ final class SherpaDiarizationModelPaths {
 /// Recognition capability is declared per model, not provider-wide: a
 /// streaming Zipformer cannot be batch-decoded and Parakeet cannot be
 /// streamed, so a model that advertised both would be lying about one of them.
-/// The provider-level set is the union, which is what capability routing in
-/// `speech_pipeline` reads.
+/// The provider-level set is the union of the capabilities of its models.
 SpeechProviderDescriptor buildSherpaDescriptor() {
   final models = <SpeechModelDescriptor>[
     for (final model in SherpaRecognitionModel.all)

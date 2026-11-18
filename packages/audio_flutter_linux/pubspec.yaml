@@ -2,9 +2,9 @@ name: audio_flutter_linux
 description: Linux implementation of audio_flutter capture and PCM playback over PulseAudio and PipeWire.
 version: 0.1.0
 resolution: workspace
-homepage: https://github.com/kshdotdev/audio-kit-dart
-repository: https://github.com/kshdotdev/audio-kit-dart
-issue_tracker: https://github.com/kshdotdev/audio-kit-dart/issues
+homepage: https://github.com/btwld/audio-kit-dart
+repository: https://github.com/btwld/audio-kit-dart
+issue_tracker: https://github.com/btwld/audio-kit-dart/issues
 topics:
   - audio
   - flutter

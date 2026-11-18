@@ -28,7 +28,7 @@ void main() {
               options: SpeechRecognitionOptions(
                 modelId: 'nova-3',
                 languageTag: 'en-US',
-                vocabulary: <String>['Ectos', 'Flutter'],
+                vocabulary: <String>['Opus', 'Flutter'],
                 providerOptions: DeepgramStreamingOptions(
                   utteranceEnd: const Duration(milliseconds: 800),
                   diarizationModel: DeepgramDiarizationModel.latest,
@@ -120,7 +120,7 @@ void main() {
       expect(connection.uri.queryParameters['sample_rate'], '16000');
       expect(connection.uri.queryParameters['language'], 'en-US');
       expect(connection.uri.queryParametersAll['keyterm'], <String>[
-        'Ectos',
+        'Opus',
         'Flutter',
       ]);
       expect(connection.uri.queryParameters['utterance_end_ms'], '800');

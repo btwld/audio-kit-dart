@@ -11,7 +11,7 @@ the signal level.
 > **This checkout does not yet pin a released native library.** Until the first
 > reviewed native release is published and its hashes are committed, supply a
 > local or explicitly pinned binary. See
-> [Native library (risk R4)](#native-library-risk-r4).
+> [Native library](#native-library).
 
 ## Layers
 
@@ -50,8 +50,8 @@ cancel. It is *not* a fallback for a missing library: that surfaces as
 - **Mono float32 at a WebRTC-supported rate (8, 16, 32, or 48 kHz).** The
   engine is created for one sample rate and the filter rejects a capture that
   disagrees, because feeding AEC3 the wrong rate produces no error and no
-  cancellation. Concepta Copilot uses 48 kHz; resample and downmix upstream for
-  any other capture format.
+  cancellation. Resample to the configured rate and downmix to mono upstream
+  when the capture format differs.
 - **One 10 ms block per native call**, from 80 samples at 8 kHz through 480 at
   48 kHz — the unit `AudioProcessing::GetFrameSize` defines. `AecProcessor`
   throws on any other size rather than asserting, since a wrong-sized block is
@@ -171,7 +171,7 @@ if (capability.isAvailable) {
 }
 ```
 
-## Native library (risk R4)
+## Native library
 
 **Decided: build hooks, with prebuilt binaries fetched and hash-pinned.** The
 full decision matrix, what was measured and on which SDK, the macOS signing

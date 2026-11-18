@@ -198,7 +198,7 @@ cp -f "$WORK/$LIB" "$DEST/$LIB"
 
 # Ad-hoc sign so the library loads under the local Hardened Runtime. This is NOT
 # distribution signing: a redistributed dylib needs a Developer ID identity and
-# notarization, which is one of the open questions in risk R4 (see README).
+# notarization (see the native library section in the README).
 if [ "$NATIVE_OS" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
   codesign --force --sign - --timestamp=none "$DEST/$LIB" >/dev/null 2>&1 ||
     warn "codesign failed for $DEST/$LIB (the library may still load locally)"

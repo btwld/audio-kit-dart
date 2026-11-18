@@ -171,9 +171,7 @@ def probe_library(path: Path, expected_version: str) -> str:
             f"expected {expected_version!r}."
         )
 
-    # The package default remains 16 kHz, while Concepta Copilot's capture graph
-    # runs at 48 kHz. A release must instantiate both before it can claim to be
-    # a usable desktop runtime.
+    # Check the 16 kHz default and the 48 kHz rate common in desktop capture.
     for sample_rate in (16000, 48000):
         handle = create(sample_rate, 1)
         if not handle:

@@ -2,9 +2,9 @@ name: speech_core
 description: Provider-neutral speech recognition, synthesis, and analysis contracts.
 version: 0.2.0
 resolution: workspace
-homepage: https://github.com/kshdotdev/audio-kit-dart
-repository: https://github.com/kshdotdev/audio-kit-dart
-issue_tracker: https://github.com/kshdotdev/audio-kit-dart/issues
+homepage: https://github.com/btwld/audio-kit-dart
+repository: https://github.com/btwld/audio-kit-dart
+issue_tracker: https://github.com/btwld/audio-kit-dart/issues
 topics:
   - speech-to-text
   - text-to-speech

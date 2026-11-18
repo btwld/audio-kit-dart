@@ -1,13 +1,7 @@
 import 'package:audio_flutter/audio_flutter.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Translated from the Swift oracle's `runTeamsIdentificationTests`
-/// (ectos Tests/EctosTests/TestRunner.swift) and the tap-expansion rules in
-/// `RecordingManager.collectAppProcessObjectIDs`.
-///
-/// The Swift suite answers "is this the main Teams app", so it *rejects*
-/// helpers; tap expansion asks the opposite question and must *include* them.
-/// The identifiers are the load-bearing part and are reused verbatim.
+// Family matching includes audio-producing helpers as well as the main app.
 void main() {
   const AudioCaptureProcess finder = AudioCaptureProcess(
     processId: 1,

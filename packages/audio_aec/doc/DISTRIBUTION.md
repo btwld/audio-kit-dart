@@ -1,4 +1,4 @@
-# Native distribution for `audio_aec` (risk R4)
+# Native distribution for `audio_aec`
 
 **Status: distribution design resolved; no prebuilt hashes are pinned yet.**
 The selected design is build hooks with separately released, SHA-256-pinned

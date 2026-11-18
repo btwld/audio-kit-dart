@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "dev.ksh" "\0"
+            VALUE "CompanyName", "Audio Kit" "\0"
             VALUE "FileDescription", "audio_flutter_example" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "audio_flutter_example" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 dev.ksh. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Kauan Guesser. All rights reserved." "\0"
             VALUE "OriginalFilename", "audio_flutter_example.exe" "\0"
             VALUE "ProductName", "audio_flutter_example" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
