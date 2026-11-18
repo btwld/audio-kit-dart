@@ -64,6 +64,11 @@ The release dylibs are ad-hoc signed. Their install names have room for the
 Dart SDK to rewrite them when bundling. Flutter packages its code asset inside
 the application, which must sign its embedded frameworks along with the app.
 
+Flutter 3.44.0 can print a framework-name warning while combining the two
+macOS binaries. For runtime 0.1.0, the resulting `aec_ffi.framework` contained
+both arm64 and x86_64. A universal release app passed ad-hoc signature
+verification and processed a 48 kHz block on each architecture.
+
 The development and native release checks exercise loading and processing.
 Developer ID signing, notarization, and Gatekeeper assessment of a final
 Flutter application are separate distribution checks. Validate the signed and
