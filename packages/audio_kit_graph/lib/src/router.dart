@@ -202,28 +202,6 @@ final class AudioRouter {
     );
   }
 
-  /// Stops admission, drains every accepted frame into its sink, then aborts
-  /// the routes with [failure].
-  ///
-  /// This is the teardown for an upstream that died: frames the routes
-  /// already accepted are valid data and reach their sinks, but the sinks
-  /// still learn the stream ended abnormally through `abort(failure:)` —
-  /// `finish` stays reserved for genuine completion. A route that already
-  /// finished or failed is left as it is.
-  Future<void> drainThenAbort({required AudioFailure failure}) {
-    _accepting = false;
-    _aborting = true;
-    return _abortFuture ??= _drainThenAbort(failure);
-  }
-
-  Future<void> _drainThenAbort(AudioFailure failure) async {
-    await _activeDispatch;
-    final pending = List<_RouteMailbox>.of(_ownedMailboxes);
-    await Future.wait(
-      pending.map((mailbox) => mailbox.drainThenAbort(failure: failure)),
-    );
-  }
-
   /// Finishes active routes and closes the event stream exactly once.
   Future<void> close() => _closeFuture ??= _close();
 
@@ -325,10 +303,6 @@ final class _RouteMailbox {
   Future<void>? _completionFuture;
   Completer<void>? _spaceAvailable;
   _GapAccumulator? _pendingGap;
-
-  /// Set by [drainThenAbort]: once the queue empties, the sink is aborted
-  /// with this failure instead of finished.
-  AudioFailure? _abortAfterDrain;
   int _acceptedFrames = 0;
   int _deliveredFrames = 0;
   int _deliveredSampleFrames = 0;
@@ -470,24 +444,6 @@ final class _RouteMailbox {
     return done;
   }
 
-  /// Keeps delivering already-accepted frames, then aborts the sink with
-  /// [failure] once the queue is empty. Terminal routes are left untouched.
-  Future<void> drainThenAbort({required AudioFailure failure}) {
-    if (state == AudioRouteState.finished ||
-        state == AudioRouteState.aborted ||
-        state == AudioRouteState.failed) {
-      return done;
-    }
-    _accepting = false;
-    _abortAfterDrain = failure;
-    _onTerminal();
-    _signalSpace();
-    state = AudioRouteState.draining;
-    _emitState(state);
-    _ensureWorker();
-    return done;
-  }
-
   Future<void> abort({required AudioFailure failure}) {
     if (state == AudioRouteState.finished ||
         state == AudioRouteState.aborted ||
@@ -541,14 +497,7 @@ final class _RouteMailbox {
 
     _worker = null;
     if (state == AudioRouteState.draining && _queue.isEmpty) {
-      final AudioFailure? pendingAbort = _abortAfterDrain;
-      if (pendingAbort != null) {
-        // drainThenAbort: every accepted frame has been delivered; now tell
-        // the sink the stream ended abnormally instead of finishing it.
-        await abort(failure: pendingAbort);
-      } else {
-        await _finishSink();
-      }
+      await _finishSink();
     } else if (_queue.isNotEmpty && state == AudioRouteState.attached) {
       _ensureWorker();
     }
