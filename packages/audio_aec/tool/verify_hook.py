@@ -26,6 +26,10 @@ def main():
     dart = shutil.which("dart")
     if dart is None:
         parser.error("Dart SDK is required")
+    # Windows PATHEXT can return dart.EXE. Dart 3.12's hook runner then
+    # appends another .exe when it launches its compiler.
+    if os.name == "nt" and Path(dart).suffix.lower() == ".exe":
+        dart = str(Path(dart).with_suffix(".exe"))
     env = os.environ.copy()
     env.pop("AUDIO_AEC_LIBRARY", None)
 
