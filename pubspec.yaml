@@ -5,30 +5,4 @@ environment:
   sdk: ^3.12.0
 
 workspace:
-  - packages/audio_core
-  - packages/audio_kit_graph
-  - packages/audio_processing
-  - packages/speech_core
-  - packages/audio_flutter_platform_interface
-  - packages/audio_flutter
-  - packages/audio_flutter_darwin
-  - packages/voice_core
-  - packages/voice_flutter
-  - packages/speech_fluidaudio
-  - packages/speech_sherpa
-  - packages/sherpa_onnx_macos
-  - packages/speech_mlx
   - packages/audio_flutter_linux
-  - packages/audio_flutter_windows
-  - packages/audio_aec
-  - packages/speech_deepgram
-  - packages/speech_openai_tts
-  - packages/audio_flutter/example
-
-# The adapter uses the 0.5.0 model-root API. Remove this workspace-only pin
-# once its hosted constraint resolves on pub.dev.
-dependency_overrides:
-  fluidaudio_dart:
-    git:
-      url: https://github.com/kshdotdev/fluidaudio-dart
-      ref: d90bccd9c4f8919d04fc38cf3182db7ea6eab90d
