@@ -22,7 +22,7 @@
 # abseil is statically linked from the meson wrap (NOT a system/Homebrew shared
 # abseil) so the result is self-contained and relocatable.
 #
-# Requirements: git, Meson, Ninja and a C++17 toolchain. Windows builds run
+# Requirements: git, Meson, Ninja and a C++ toolchain. Windows builds run
 # under Git Bash with the x64 developer environment set up by the workflow.
 # Usage: tool/build_native.sh [DEST_DIR]
 set -euo pipefail
@@ -99,7 +99,8 @@ if [ "$NATIVE_OS" = Windows ]; then
   # Meson and Ninja must see the MSVC linker in the same directory as cl.exe.
   export PATH="$(dirname "$(command -v cl)"):$PATH"
   export CC=cl CXX=cl
-  options+=(-Db_vscrt=mt)
+  # The pinned WebRTC source uses C++20 designated initializers on MSVC.
+  options+=(-Db_vscrt=mt -Dcpp_std=c++20)
 fi
 meson setup "$SRC/build" "$SRC" "${options[@]}"
 meson compile -C "$SRC/build" aec_ffi
