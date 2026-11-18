@@ -1,6 +1,6 @@
 name: audio_core
 description: Provider-neutral PCM audio types and asynchronous session contracts.
-version: 0.1.0
+version: 0.1.1
 resolution: workspace
 homepage: https://github.com/btwld/audio-kit-dart
 repository: https://github.com/btwld/audio-kit-dart
