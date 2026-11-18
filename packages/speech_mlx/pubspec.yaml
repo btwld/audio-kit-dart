@@ -1,6 +1,6 @@
 name: speech_mlx
 description: MLX Audio implementation of provider-neutral batch STT and TTS.
-version: 0.2.0
+version: 0.2.1
 resolution: workspace
 homepage: https://github.com/btwld/audio-kit-dart
 repository: https://github.com/btwld/audio-kit-dart

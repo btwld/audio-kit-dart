@@ -6,7 +6,7 @@
 /// isolate, keeps it resident across requests, and hands back probabilities the
 /// adapter does not distort.
 ///
-/// Numeric parity against the Swift reference implementation and the fp32 ONNX reference
+/// Numeric parity against the ectos Swift oracle and the fp32 ONNX reference
 /// lives where the model does (`mlx_audio`, `test/smart_turn_parity_test.dart`).
 ///
 /// **Opt-in twice over.** It carries the `weights` tag AND a runtime skip on
