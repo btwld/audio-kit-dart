@@ -5,54 +5,20 @@ import 'package:audio_core/audio_core.dart';
 import 'package:audio_processing/audio_processing.dart';
 import 'package:speech_core/speech_core.dart';
 
-import 'options.dart';
 import 'session_support.dart';
 
 /// Stateful conversion from one fixed input format to 16 kHz mono PCM.
-///
-/// The output is one unbroken stream whatever the input did: the converter
-/// numbers its frames itself, so their sequences and sample offsets always
-/// follow on and none carries a discontinuity. Consumers that cut the output
-/// into fixed chunks therefore never see a break of their own. Timestamps are
-/// left as the source reported them.
 final class FluidPcm16MonoConverter {
-  /// Creates a converter for [inputFormat].
-  ///
-  /// [discontinuityPolicy] defaults to [FluidDiscontinuityPolicy.fail], which
-  /// suits finite audio; the streaming sessions pass their own.
-  FluidPcm16MonoConverter(
-    this.inputFormat, {
-    this.discontinuityPolicy = FluidDiscontinuityPolicy.fail,
-  });
+  FluidPcm16MonoConverter(this.inputFormat);
 
   /// Fixed caller-facing format.
   final AudioFormat inputFormat;
 
-  /// What [process] does with a frame that does not continue the one before.
-  final FluidDiscontinuityPolicy discontinuityPolicy;
-
   final AudioDownmixer _downmixer = AudioDownmixer();
   final AudioResampler _resampler = AudioResampler(outputSampleRate: 16000);
   AudioStreamKey? _stream;
-  int? _expectedInputOffset;
-  var _outputSampleOffset = 0;
-  var _outputSequence = 0;
-  var _resumedDiscontinuityCount = 0;
-
-  /// Number of breaks in the input that [process] has carried on across.
-  ///
-  /// Only [FluidDiscontinuityPolicy.resume] counts any. A tally for the
-  /// converter's whole life: [reset] leaves it alone.
-  int get resumedDiscontinuityCount => _resumedDiscontinuityCount;
 
   /// Converts one input frame while retaining resampler state.
-  ///
-  /// Under [FluidDiscontinuityPolicy.fail] a frame marked discontinuous is
-  /// refused with `fluid_discontinuous_audio`. Under
-  /// [FluidDiscontinuityPolicy.resume] a break, marked or shown by a jump in
-  /// sample offsets, drains what the resampler held of the audio before it and
-  /// starts the audio after it from fresh state, so nothing is interpolated
-  /// across the gap.
   List<AudioFrame> process(AudioFrame frame) {
     if (frame.format != inputFormat) {
       throw fluidAudioFailure(
@@ -61,8 +27,7 @@ final class FluidPcm16MonoConverter {
         'The audio frame format does not match the prepared session.',
       );
     }
-    final resumes = discontinuityPolicy == FluidDiscontinuityPolicy.resume;
-    if (frame.discontinuity != null && !resumes) {
+    if (frame.discontinuity != null) {
       throw fluidAudioFailure(
         'fluid_discontinuous_audio',
         AudioFailureStage.processing,
@@ -81,37 +46,10 @@ final class FluidPcm16MonoConverter {
     _stream = key;
 
     final output = <AudioFrame>[];
-    var input = frame;
-    final expectedOffset = _expectedInputOffset;
-    // A mark on the very first frame separates it from audio this converter
-    // never saw, so there is nothing to carry on across.
-    final broke =
-        existing != null &&
-        (frame.discontinuity != null ||
-            (expectedOffset != null && expectedOffset != frame.sampleOffset));
-    if (resumes && broke) {
-      output.addAll(_resampler.flush(stream: key));
-      _resumedDiscontinuityCount += 1;
-    }
-    if (frame.discontinuity != null) {
-      // Cleared so the transforms do not reset a second time or pass it on.
-      input = AudioFrame.owned(
-        format: frame.format,
-        samples: frame.samples,
-        sourceId: frame.sourceId,
-        trackId: frame.trackId,
-        clockId: frame.clockId,
-        sequence: frame.sequence,
-        sampleOffset: frame.sampleOffset,
-        timestamp: frame.timestamp,
-      );
-    }
-    _expectedInputOffset = frame.endSampleOffset;
-
-    for (final mono in _downmixer.process(input)) {
+    for (final mono in _downmixer.process(frame)) {
       output.addAll(_resampler.process(mono));
     }
-    return <AudioFrame>[for (final converted in output) _renumber(converted)];
+    return output;
   }
 
   /// Flushes the resampler look-behind.
@@ -120,10 +58,7 @@ final class FluidPcm16MonoConverter {
     if (key == null) {
       return const <AudioFrame>[];
     }
-    return <AudioFrame>[
-      for (final converted in _resampler.flush(stream: key))
-        _renumber(converted),
-    ];
+    return _resampler.flush(stream: key);
   }
 
   /// Discards all transform state.
@@ -131,26 +66,6 @@ final class FluidPcm16MonoConverter {
     _downmixer.reset();
     _resampler.reset();
     _stream = null;
-    _expectedInputOffset = null;
-    _outputSampleOffset = 0;
-    _outputSequence = 0;
-  }
-
-  /// Places [converted], which the transforms own, next on the output stream.
-  AudioFrame _renumber(AudioFrame converted) {
-    final output = AudioFrame.owned(
-      format: converted.format,
-      samples: converted.samples,
-      sourceId: converted.sourceId,
-      trackId: converted.trackId,
-      clockId: converted.clockId,
-      sequence: _outputSequence,
-      sampleOffset: _outputSampleOffset,
-      timestamp: converted.timestamp,
-    );
-    _outputSequence += 1;
-    _outputSampleOffset += output.frameCount;
-    return output;
   }
 }
 

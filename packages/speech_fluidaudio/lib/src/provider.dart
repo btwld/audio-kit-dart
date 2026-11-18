@@ -27,17 +27,9 @@ final class FluidAudioSpeechProvider extends IdempotentSpeechProvider
   ///
   /// Tests and alternative transports can inject an adapter-owned runtime;
   /// production defaults to the `fluidaudio_dart` plugin.
-  ///
-  /// [streamingDiscontinuityPolicy] applies to the streaming recognition, VAD
-  /// and end-of-utterance sessions. It defaults to
-  /// [FluidDiscontinuityPolicy.resume] because those sessions listen to live
-  /// capture, which restarts on its own; pass
-  /// [FluidDiscontinuityPolicy.fail] to end a session at the first break
-  /// instead. Batch operations always refuse discontinuous audio.
   FluidAudioSpeechProvider({
     FluidAudioRuntime? runtime,
     this.maximumBatchAudioDuration = const Duration(minutes: 30),
-    this.streamingDiscontinuityPolicy = FluidDiscontinuityPolicy.resume,
   }) : _runtime = runtime ?? FluidNativeRuntime() {
     if (maximumBatchAudioDuration <= Duration.zero ||
         (maximumBatchAudioDuration.inMicroseconds * 16000) <
@@ -56,10 +48,6 @@ final class FluidAudioSpeechProvider extends IdempotentSpeechProvider
 
   /// Maximum converted 16 kHz mono audio retained for one batch operation.
   final Duration maximumBatchAudioDuration;
-
-  /// What a streaming session does with a frame that does not continue the
-  /// one before it.
-  final FluidDiscontinuityPolicy streamingDiscontinuityPolicy;
 
   int get _maximumBatchAudioSamples =>
       (maximumBatchAudioDuration.inMicroseconds * 16000) ~/
@@ -218,7 +206,6 @@ final class FluidAudioSpeechProvider extends IdempotentSpeechProvider
         driver: driver,
         format: request.inputFormat,
         languageTag: request.options.languageTag,
-        discontinuityPolicy: streamingDiscontinuityPolicy,
         cancellation: request.cancellation,
         onClosed: _unregisterSession,
       );
@@ -370,7 +357,6 @@ final class FluidAudioSpeechProvider extends IdempotentSpeechProvider
         endThreshold: request.endThreshold,
         minimumSpeech: request.minimumSpeech,
         minimumSilence: request.minimumSilence,
-        discontinuityPolicy: streamingDiscontinuityPolicy,
         cancellation: request.cancellation,
         onClosed: _unregisterSession,
       );
@@ -421,7 +407,6 @@ final class FluidAudioSpeechProvider extends IdempotentSpeechProvider
       session = FluidEndOfUtteranceSession(
         driver: driver,
         format: request.inputFormat,
-        discontinuityPolicy: streamingDiscontinuityPolicy,
         cancellation: request.cancellation,
         onClosed: _unregisterSession,
       );

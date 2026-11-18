@@ -17,7 +17,6 @@ void main() {
       expect(fluidDiarizationModelId, isNotEmpty);
       expect(<Type>[
         FluidDiarizationOptions,
-        FluidDiscontinuityPolicy,
         FluidEndOfUtteranceChunk,
         FluidEndOfUtteranceOptions,
         FluidRecognitionModel,

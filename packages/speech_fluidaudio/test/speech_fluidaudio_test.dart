@@ -23,7 +23,7 @@ void main() {
             inputFormat: mono16k,
             options: SpeechRecognitionOptions(
               languageTag: 'en-US',
-              vocabulary: <String>['Opus'],
+              vocabulary: <String>['Ectos'],
               providerOptions: FluidRecognitionOptions(
                 source: FluidRecognitionSource.systemAudio,
                 vocabulary: <FluidVocabularyEntry>[
@@ -43,7 +43,7 @@ void main() {
           runtime.lastStreamingConfiguration.vocabulary.map(
             (entry) => entry.text,
           ),
-          <String>['FluidAudio', 'Opus'],
+          <String>['FluidAudio', 'Ectos'],
         );
 
         final events = <SpeechRecognitionEvent>[];
@@ -258,6 +258,7 @@ void main() {
       await session.write(
         _frame(mono16k, Float32List.fromList(<double>[0.1, 0.2])),
       );
+      driver.finishText = 'done';
       await session.finish();
 
       expect(events, hasLength(1));
@@ -266,381 +267,6 @@ void main() {
 
       await session.close();
       await subscription.cancel();
-      await provider.close();
-    });
-
-    group('end-of-utterance re-arming', () {
-      late _FakeEouDriver driver;
-      late FluidAudioSpeechProvider provider;
-      late EndOfUtteranceSession session;
-      late List<EndOfUtteranceEvent> events;
-      late StreamSubscription<EndOfUtteranceEvent> subscription;
-
-      AudioFrame audio() =>
-          _frame(mono16k, Float32List.fromList(<double>[0.1, 0.2]));
-
-      setUp(() async {
-        final runtime = _FakeRuntime();
-        driver = _FakeEouDriver();
-        runtime.nextEou = driver;
-        provider = FluidAudioSpeechProvider(runtime: runtime);
-        session = await provider.prepareEndOfUtterance(
-          EndOfUtteranceRequest(inputFormat: mono16k),
-        );
-        events = <EndOfUtteranceEvent>[];
-        subscription = session.events.listen(events.add);
-      });
-
-      tearDown(() async {
-        await session.close();
-        await subscription.cancel();
-        await provider.close();
-      });
-
-      test('reports every utterance end, not only the first', () async {
-        await session.write(audio());
-        driver.commit('first question');
-        // Writes queue behind the reset, so awaiting one awaits it too.
-        await session.write(audio());
-        expect(driver.resetCount, 1);
-
-        driver.commit('second question');
-        await session.write(audio());
-        await session.finish();
-
-        expect(events, hasLength(2));
-        expect(events.every((event) => event.isFinal), isTrue);
-        expect(driver.calls, <String>[
-          'feed',
-          'reset',
-          'feed',
-          'reset',
-          'feed',
-          'finish',
-        ]);
-      });
-
-      test('queues the reset behind audio already being fed', () async {
-        final gate = Completer<void>();
-        driver.feedGate = gate.future;
-        final writing = session.write(audio());
-        await pumpEventQueue();
-        expect(driver.calls, <String>['feed']);
-
-        driver.commit('done');
-        // The boundary is reported at once; only the reset waits.
-        expect(events, hasLength(1));
-        await pumpEventQueue();
-        expect(driver.calls, <String>['feed']);
-
-        driver.feedGate = null;
-        gate.complete();
-        await writing;
-        await session.write(audio());
-
-        expect(driver.calls, <String>['feed', 'reset', 'feed']);
-      });
-
-      test('a boundary the final flush commits is reported once and the '
-          'ended session is not reset', () async {
-        driver.commitDuringFinish = 'done';
-        await session.write(audio());
-        await session.finish();
-        await pumpEventQueue();
-
-        expect(events, hasLength(1));
-        expect(driver.resetCount, 0);
-        expect(session.status.state, AudioSessionState.finished);
-      });
-
-      test('reports an utterance that repeats the one before it', () async {
-        driver.commit('yes');
-        await session.write(audio());
-        // The reset model holds only the new utterance when it is flushed.
-        driver.finishText = 'yes';
-        await session.finish();
-
-        expect(events, hasLength(2));
-      });
-
-      test('fails the session when the detector cannot be reset', () async {
-        driver.resetError = StateError('reset failed');
-        driver.commit('done');
-        await pumpEventQueue();
-
-        expect(events, hasLength(1));
-        expect(session.status.state, AudioSessionState.failed);
-        expect(session.status.failure?.code, 'fluid_eou_reset_failed');
-        expect(driver.closeCount, 1);
-        expect(() => session.write(audio()), throwsStateError);
-      });
-    });
-  });
-
-  group('discontinuous audio', () {
-    final mono48k = AudioFormat(sampleRate: 48000, channels: 1);
-
-    group('FluidPcm16MonoConverter', () {
-      test('refuses a frame marked discontinuous unless told to resume', () {
-        final converter = FluidPcm16MonoConverter(mono16k);
-        converter.process(_frame(mono16k, _constant(mono16k, 160, 0.5)));
-
-        expect(converter.discontinuityPolicy, FluidDiscontinuityPolicy.fail);
-        expect(
-          () => converter.process(
-            _frame(
-              mono16k,
-              _constant(mono16k, 160, 0.5),
-              sequence: 1,
-              sampleOffset: 160,
-              discontinuity: _restart(),
-            ),
-          ),
-          throwsA(_isAudioFailure('fluid_discontinuous_audio')),
-        );
-        expect(converter.resumedDiscontinuityCount, 0);
-      });
-
-      test('resumes across a marked break as one unbroken stream', () {
-        final converter = FluidPcm16MonoConverter(
-          mono48k,
-          discontinuityPolicy: FluidDiscontinuityPolicy.resume,
-        );
-
-        final output = <AudioFrame>[
-          ...converter.process(_frame(mono48k, _constant(mono48k, 4800, 1))),
-          // A second of capture is missing between the two frames.
-          ...converter.process(
-            _frame(
-              mono48k,
-              _constant(mono48k, 4800, -1),
-              sequence: 7,
-              sampleOffset: 52800,
-              discontinuity: _restart(),
-            ),
-          ),
-          ...converter.flush(),
-        ];
-
-        expect(converter.resumedDiscontinuityCount, 1);
-        _expectUnbroken(output);
-        final samples = output.expand((frame) => frame.samples).toList();
-        expect(samples.length, inInclusiveRange(3198, 3202));
-        // Nothing is interpolated across the gap.
-        expect(samples, everyElement(anyOf(1.0, -1.0)));
-        expect(samples.where((sample) => sample == 1).length, 1600);
-      });
-
-      test('resumes across an unmarked jump in sample offsets', () {
-        final converter = FluidPcm16MonoConverter(
-          mono48k,
-          discontinuityPolicy: FluidDiscontinuityPolicy.resume,
-        );
-
-        final output = <AudioFrame>[
-          ...converter.process(_frame(mono48k, _constant(mono48k, 4800, 1))),
-          ...converter.process(
-            _frame(
-              mono48k,
-              _constant(mono48k, 4800, -1),
-              sequence: 1,
-              sampleOffset: 9600,
-            ),
-          ),
-        ];
-
-        expect(converter.resumedDiscontinuityCount, 1);
-        _expectUnbroken(output);
-      });
-
-      test('does not count a mark on the first frame or contiguous audio', () {
-        final converter = FluidPcm16MonoConverter(
-          mono48k,
-          discontinuityPolicy: FluidDiscontinuityPolicy.resume,
-        );
-
-        final output = <AudioFrame>[
-          ...converter.process(
-            _frame(
-              mono48k,
-              _constant(mono48k, 4800, 1),
-              sequence: 3,
-              sampleOffset: 14400,
-              discontinuity: _restart(),
-            ),
-          ),
-          ...converter.process(
-            _frame(
-              mono48k,
-              _constant(mono48k, 4800, 1),
-              sequence: 4,
-              sampleOffset: 19200,
-            ),
-          ),
-        ];
-
-        expect(converter.resumedDiscontinuityCount, 0);
-        _expectUnbroken(output);
-      });
-    });
-
-    test('streaming recognition keeps listening across a capture '
-        'restart', () async {
-      final runtime = _FakeRuntime();
-      final driver = _FakeStreamingAsrDriver();
-      runtime.nextStreaming = driver;
-      final provider = FluidAudioSpeechProvider(runtime: runtime);
-      final session =
-          await provider.prepareStreamingRecognition(
-                StreamingRecognitionRequest(inputFormat: mono16k),
-              )
-              as FluidStreamingSpeechToTextSession;
-
-      await session.write(_frame(mono16k, _constant(mono16k, 160, 0.25)));
-      await session.write(
-        _frame(
-          mono16k,
-          _constant(mono16k, 160, 0.5),
-          sequence: 9,
-          sampleOffset: 32160,
-          discontinuity: _restart(),
-        ),
-      );
-
-      expect(session.status.state, AudioSessionState.active);
-      expect(session.discontinuityPolicy, FluidDiscontinuityPolicy.resume);
-      expect(session.resumedDiscontinuityCount, 1);
-      expect(session.convertedSampleCount, 320);
-      expect(driver.feeds, hasLength(2));
-      expect(driver.feeds.last, everyElement(0.5));
-
-      await session.close();
-      await provider.close();
-    });
-
-    test('a strict provider ends the session at a discontinuous '
-        'frame', () async {
-      final runtime = _FakeRuntime();
-      final driver = _FakeStreamingAsrDriver();
-      runtime.nextStreaming = driver;
-      final provider = FluidAudioSpeechProvider(
-        runtime: runtime,
-        streamingDiscontinuityPolicy: FluidDiscontinuityPolicy.fail,
-      );
-      final session = await provider.prepareStreamingRecognition(
-        StreamingRecognitionRequest(inputFormat: mono16k),
-      );
-
-      await session.write(_frame(mono16k, _constant(mono16k, 160, 0.25)));
-      await expectLater(
-        session.write(
-          _frame(
-            mono16k,
-            _constant(mono16k, 160, 0.5),
-            sequence: 1,
-            sampleOffset: 160,
-            discontinuity: _restart(),
-          ),
-        ),
-        throwsA(_isAudioFailure('fluid_discontinuous_audio')),
-      );
-
-      expect(session.status.state, AudioSessionState.failed);
-      expect(session.status.failure?.code, 'fluid_discontinuous_audio');
-      expect(driver.feeds, hasLength(1));
-
-      await session.close();
-      await provider.close();
-    });
-
-    test('VAD keeps its exact 4096-sample feeds across a break', () async {
-      final runtime = _FakeRuntime();
-      final driver = _FakeVadDriver();
-      runtime.nextVad = driver;
-      final provider = FluidAudioSpeechProvider(runtime: runtime);
-      final session = await provider.prepareVoiceActivityDetection(
-        VoiceActivityDetectionRequest(inputFormat: mono16k),
-      );
-
-      await session.write(_frame(mono16k, _constant(mono16k, 3000, 0.25)));
-      expect(driver.feeds, isEmpty);
-      await session.write(
-        _frame(
-          mono16k,
-          _constant(mono16k, 3000, 0.5),
-          sequence: 4,
-          sampleOffset: 19000,
-          discontinuity: _restart(),
-        ),
-      );
-
-      // The audio on either side of the break fills one chunk together; a
-      // break in the converted stream would have flushed 3000 samples alone.
-      expect(driver.feeds, hasLength(1));
-      expect(driver.feeds.single, hasLength(4096));
-      expect(driver.feeds.single.sublist(0, 3000), everyElement(0.25));
-      expect(driver.feeds.single.sublist(3000), everyElement(0.5));
-      expect(session.status.state, AudioSessionState.active);
-
-      await session.close();
-      await provider.close();
-    });
-
-    test('end-of-utterance detection keeps listening across a capture '
-        'restart', () async {
-      final runtime = _FakeRuntime();
-      final driver = _FakeEouDriver();
-      runtime.nextEou = driver;
-      final provider = FluidAudioSpeechProvider(runtime: runtime);
-      final session = await provider.prepareEndOfUtterance(
-        EndOfUtteranceRequest(inputFormat: mono16k),
-      );
-
-      await session.write(_frame(mono16k, _constant(mono16k, 160, 0.25)));
-      await session.write(
-        _frame(
-          mono16k,
-          _constant(mono16k, 160, 0.5),
-          sequence: 2,
-          sampleOffset: 32000,
-          discontinuity: _restart(),
-        ),
-      );
-
-      expect(session.status.state, AudioSessionState.active);
-      expect(driver.calls, <String>['feed', 'feed']);
-
-      await session.close();
-      await provider.close();
-    });
-
-    test('batch recognition still refuses discontinuous audio', () async {
-      final runtime = _FakeRuntime();
-      final source = _FiniteAudioSource(
-        format: mono16k,
-        samples: _constant(mono16k, 16000, 0.25),
-        discontinuity: _restart(),
-      );
-      final provider = FluidAudioSpeechProvider(runtime: runtime);
-
-      await expectLater(
-        provider.transcribe(BatchRecognitionRequest(audio: source)),
-        throwsA(
-          isA<SpeechFailure>()
-              .having(
-                (failure) => failure.code,
-                'code',
-                'fluid_batch_asr_failed',
-              )
-              .having(
-                (failure) => failure.safeCause,
-                'safeCause',
-                'AudioFailure',
-              ),
-        ),
-      );
-      expect(runtime.batchCreateCount, 0);
-
       await provider.close();
     });
   });
@@ -806,7 +432,8 @@ void main() {
       final runtime = _FakeRuntime();
       final source = _FiniteAudioSource(
         format: mono16k,
-        // One sample below the one-second minimum at 16 kHz.
+        // 15,999 samples: one short of the guard, which the Swift oracle
+        // enforces as 16,000 samples at 16 kHz.
         samples: recognizableSamples(count: 15999),
       );
       final provider = FluidAudioSpeechProvider(runtime: runtime);
@@ -1102,11 +729,11 @@ void main() {
       final provider = FluidAudioSpeechProvider(runtime: runtime);
 
       await provider.addRule(
-        InverseTextNormalizationRule(spoken: 'opus', written: 'Opus'),
+        InverseTextNormalizationRule(spoken: 'ectos', written: 'Ectos'),
       );
 
       expect(runtime.lastItn.rules, <({String spoken, String written})>[
-        (spoken: 'opus', written: 'Opus'),
+        (spoken: 'ectos', written: 'Ectos'),
       ]);
       await provider.close();
     });
@@ -1463,45 +1090,16 @@ SpeechTranscript _spokenTranscript() => SpeechTranscript(
   ],
 );
 
-AudioFrame _frame(
-  AudioFormat format,
-  Float32List samples, {
-  int sequence = 0,
-  int sampleOffset = 0,
-  AudioDiscontinuity? discontinuity,
-}) => AudioFrame(
+AudioFrame _frame(AudioFormat format, Float32List samples) => AudioFrame(
   format: format,
   samples: samples,
   sourceId: 'test-source',
   trackId: 'test-track',
   clockId: 'test-clock',
-  sequence: sequence,
-  sampleOffset: sampleOffset,
-  timestamp: format.durationForFrames(sampleOffset),
-  discontinuity: discontinuity,
+  sequence: 0,
+  sampleOffset: 0,
+  timestamp: Duration.zero,
 );
-
-/// [count] sample frames of [value] on every channel.
-Float32List _constant(AudioFormat format, int count, double value) =>
-    Float32List(count * format.channels)
-      ..fillRange(0, count * format.channels, value);
-
-AudioDiscontinuity _restart() =>
-    AudioDiscontinuity(reason: AudioDiscontinuityReason.sourceRestart);
-
-Matcher _isAudioFailure(String code) =>
-    isA<AudioFailure>().having((failure) => failure.code, 'code', code);
-
-/// Expects [frames] to be one unbroken stream starting at offset zero.
-void _expectUnbroken(List<AudioFrame> frames) {
-  var sampleOffset = 0;
-  for (var index = 0; index < frames.length; index += 1) {
-    expect(frames[index].discontinuity, isNull);
-    expect(frames[index].sequence, index);
-    expect(frames[index].sampleOffset, sampleOffset);
-    sampleOffset = frames[index].endSampleOffset;
-  }
-}
 
 final class _FakeRuntime implements FluidAudioRuntime {
   _FakeStreamingAsrDriver? nextStreaming;
@@ -1778,66 +1376,21 @@ final class _FakeVadDriver implements FluidVadDriver {
   }
 }
 
-/// Mirrors the native detector's latch: it commits one boundary and then
-/// stays silent until it is reset.
 final class _FakeEouDriver implements FluidEndOfUtteranceDriver {
   final StreamController<FluidDriverEndOfUtteranceUpdate> updatesController =
       StreamController<FluidDriverEndOfUtteranceUpdate>.broadcast(sync: true);
-
-  /// `feed`, `reset` and `finish`, in the order they reached the driver.
-  final List<String> calls = <String>[];
-  Future<void>? feedGate;
-  Object? resetError;
-
-  /// A boundary the final flush commits, as the model can when it decodes the
-  /// audio it was still holding.
-  String? commitDuringFinish;
   var finishText = '';
   var closeCount = 0;
-  var _committed = false;
-
-  int get resetCount => calls.where((call) => call == 'reset').length;
-
-  /// Commits a boundary the way the model does: once per reset.
-  void commit(String text) {
-    if (_committed) {
-      return;
-    }
-    _committed = true;
-    updatesController.add(
-      FluidDriverEndOfUtteranceUpdate(text: text, isFinal: true),
-    );
-  }
 
   @override
   Stream<FluidDriverEndOfUtteranceUpdate> get updates =>
       updatesController.stream;
 
   @override
-  Future<void> feed(Float32List samples) async {
-    calls.add('feed');
-    await feedGate;
-  }
+  Future<void> feed(Float32List samples) async {}
 
   @override
-  Future<String> finish() async {
-    calls.add('finish');
-    if (commitDuringFinish case final String text) {
-      commit(text);
-      return text;
-    }
-    return finishText;
-  }
-
-  @override
-  Future<void> reset() async {
-    calls.add('reset');
-    if (resetError case final Object error) {
-      throw error;
-    }
-    _committed = false;
-    finishText = '';
-  }
+  Future<String> finish() async => finishText;
 
   @override
   Future<void> close() async {
@@ -1906,12 +1459,7 @@ final class _FiniteAudioSource implements AudioSource {
   _FiniteAudioSource({
     required AudioFormat format,
     required Float32List samples,
-    AudioDiscontinuity? discontinuity,
-  }) : session = _FiniteAudioSourceSession(
-         format: format,
-         samples: samples,
-         discontinuity: discontinuity,
-       );
+  }) : session = _FiniteAudioSourceSession(format: format, samples: samples);
 
   final _FiniteAudioSourceSession session;
 
@@ -1925,11 +1473,7 @@ final class _FiniteAudioSource implements AudioSource {
 }
 
 final class _FiniteAudioSourceSession implements AudioSourceSession {
-  _FiniteAudioSourceSession({
-    required this.format,
-    required this.samples,
-    this.discontinuity,
-  }) {
+  _FiniteAudioSourceSession({required this.format, required this.samples}) {
     _framesController = StreamController<AudioFrame>.broadcast(
       sync: true,
       onListen: () {
@@ -1941,7 +1485,6 @@ final class _FiniteAudioSourceSession implements AudioSourceSession {
   @override
   final AudioFormat format;
   final Float32List samples;
-  final AudioDiscontinuity? discontinuity;
   late final StreamController<AudioFrame> _framesController;
   var hadFrameListenerWhenStarted = false;
   var closeCount = 0;
@@ -1990,7 +1533,6 @@ final class _FiniteAudioSourceSession implements AudioSourceSession {
           sequence: 0,
           sampleOffset: 0,
           timestamp: Duration.zero,
-          discontinuity: discontinuity,
         ),
       );
     }
