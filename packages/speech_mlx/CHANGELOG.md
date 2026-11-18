@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Update repository and issue links for the move to the concepta.dev publisher.
+
 ## 0.2.0
 
 - Added `MlxSmartTurnScorer`, a `TurnCompletionScorer` over the pinned Smart

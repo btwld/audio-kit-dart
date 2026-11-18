@@ -1,6 +1,6 @@
 name: audio_kit_graph
 description: Bounded, failure-isolated N-way routing for provider-neutral audio.
-version: 0.1.0
+version: 0.1.1
 resolution: workspace
 homepage: https://github.com/btwld/audio-kit-dart
 repository: https://github.com/btwld/audio-kit-dart

@@ -1,6 +1,6 @@
 name: voice_core
 description: Cancellable provider-neutral voice conversation orchestration.
-version: 0.2.0
+version: 0.2.1
 resolution: workspace
 homepage: https://github.com/btwld/audio-kit-dart
 repository: https://github.com/btwld/audio-kit-dart

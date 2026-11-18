@@ -1,6 +1,6 @@
 name: speech_openai_tts
 description: OpenAI speech synthesis adapter producing provider-neutral audio.
-version: 0.1.1
+version: 0.1.2
 resolution: workspace
 homepage: https://github.com/btwld/audio-kit-dart
 repository: https://github.com/btwld/audio-kit-dart

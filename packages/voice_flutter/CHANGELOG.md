@@ -28,6 +28,10 @@
   over the composed microphone cannot be restarted after `stop()`.
 - Add a dependency on `audio_aec`. Half-duplex behavior is unchanged.
 
+## 0.1.1
+
+- Update repository and issue links for the move to the concepta.dev publisher.
+
 ## 0.1.0
 
 - Initial public release.

@@ -24,6 +24,10 @@
 - `FluidPcm16MonoConverter` numbers its output as one unbroken stream, so the
   VAD session's 4096-sample chunking is never cut short by a break upstream.
 
+## 0.2.1
+
+- Update repository and issue links for the move to the concepta.dev publisher.
+
 ## 0.2.0
 
 - Add host-managed model roots to `FluidNativeRuntime`:
