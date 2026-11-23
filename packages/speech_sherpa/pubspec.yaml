@@ -1,6 +1,6 @@
 name: speech_sherpa
 description: Cross-platform speech provider over sherpa-onnx - streaming and batch STT, VAD, diarization, and speaker embeddings.
-version: 0.1.1
+version: 0.2.0
 resolution: workspace
 homepage: https://github.com/btwld/audio-kit-dart
 repository: https://github.com/btwld/audio-kit-dart
@@ -25,6 +25,7 @@ dependencies:
   archive: ^4.0.0
   audio_core: ^0.1.0
   audio_processing: ^0.2.0
+  crypto: ^3.0.6
   flutter:
     sdk: flutter
   http: ^1.5.0

@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:audio_core/audio_core.dart';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:speech_core/speech_core.dart';
@@ -91,14 +93,51 @@ void main() {
   });
 
   group('install', () {
-    test('downloads and extracts a recognition archive', () async {
-      const model = SherpaRecognitionModel.parakeetTdtV3;
-      final archive = buildArchive(<String, String>{
-        '${model.unpackedDirName}/${model.encoderFile}': 'encoder',
-        '${model.unpackedDirName}/${model.decoderFile}': 'decoder',
-        '${model.unpackedDirName}/${model.joinerFile}': 'joiner',
-        '${model.unpackedDirName}/${model.tokensFile}': 'tokens',
-      });
+    /// A transducer entry whose size and digest describe [archive], so the
+    /// install checks pass; [sha256] and [bytes] override them to break it.
+    SherpaRecognitionModel modelFor(
+      Uint8List archive, {
+      String? sha256,
+      int? bytes,
+    }) => SherpaRecognitionModel(
+      id: 'test-transducer',
+      displayName: 'Test transducer',
+      kind: SherpaRecognitionModelKind.transducer,
+      archiveUrl: 'https://example.test/test-transducer.tar.bz2',
+      archiveBytes: bytes ?? archive.length,
+      archiveSha256: sha256 ?? crypto.sha256.convert(archive).toString(),
+      unpackedDirName: 'test-transducer',
+      encoderFile: 'encoder.onnx',
+      decoderFile: 'decoder.onnx',
+      joinerFile: 'joiner.onnx',
+      tokensFile: 'tokens.txt',
+    );
+
+    Uint8List completeArchive() => buildArchive(<String, String>{
+      'test-transducer/encoder.onnx': 'encoder',
+      'test-transducer/decoder.onnx': 'decoder',
+      'test-transducer/joiner.onnx': 'joiner',
+      'test-transducer/tokens.txt': 'tokens',
+    });
+
+    /// Nothing a failed install leaves may resolve or linger.
+    void expectNothingInstalled(
+      SherpaModelRegistry registry,
+      SherpaRecognitionModel model,
+    ) {
+      expect(registry.resolveRecognition(model), isNull);
+      expect(registry.recognitionDirectory(model).existsSync(), isFalse);
+      final staging = Directory('${root.path}/.staging');
+      expect(
+        staging.existsSync() ? staging.listSync() : const <FileSystemEntity>[],
+        isEmpty,
+        reason: 'no staged download survives',
+      );
+    }
+
+    test('downloads, verifies and extracts a recognition archive', () async {
+      final archive = completeArchive();
+      final model = modelFor(archive);
       final client = _FakeClient({model.archiveUrl: archive});
       final registry = SherpaModelRegistry(
         root: root,
@@ -111,28 +150,22 @@ void main() {
         onProgress: progress.add,
       );
 
-      expect(File(paths.encoder).existsSync(), isTrue);
+      expect(File(paths.encoder).readAsStringSync(), 'encoder');
       expect(File(paths.joiner!).existsSync(), isTrue);
       expect(progress.last, 1);
       expect(client.requested, <String>[model.archiveUrl]);
-      // No partial file survives a successful install.
       expect(
-        root.listSync().whereType<File>().where(
-          (f) => f.path.endsWith('.part'),
-        ),
+        Directory('${root.path}/.staging').listSync(),
         isEmpty,
+        reason: 'staging is cleaned after a successful install',
       );
     });
 
     test(
       'is idempotent and skips the network when already installed',
       () async {
-        const model = SherpaRecognitionModel.whisperBaseEn;
-        final archive = buildArchive(<String, String>{
-          '${model.unpackedDirName}/${model.encoderFile}': 'encoder',
-          '${model.unpackedDirName}/${model.decoderFile}': 'decoder',
-          '${model.unpackedDirName}/${model.tokensFile}': 'tokens',
-        });
+        final archive = completeArchive();
+        final model = modelFor(archive);
         final client = _FakeClient({model.archiveUrl: archive});
         final registry = SherpaModelRegistry(
           root: root,
@@ -146,46 +179,150 @@ void main() {
       },
     );
 
-    test('downloads the bare Silero VAD file', () async {
-      final client = _FakeClient({
-        SherpaFileModel.sileroVad.url: Uint8List.fromList(<int>[1, 2, 3, 4]),
-      });
+    test('a corrupt download installs nothing', () async {
+      final archive = completeArchive();
+      final model = modelFor(archive, sha256: '0' * 64);
       final registry = SherpaModelRegistry(
         root: root,
-        httpClientFactory: () => client,
+        httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
       );
 
-      final path = await registry.installVad();
-
-      expect(File(path).readAsBytesSync(), <int>[1, 2, 3, 4]);
-      expect(registry.resolveVad(), path);
-      expect(File('$path.part').existsSync(), isFalse);
+      await expectLater(
+        registry.installRecognition(model),
+        throwsA(
+          isA<SpeechFailure>()
+              .having((f) => f.code, 'code', 'sherpa_model_download_corrupt')
+              .having((f) => f.retryable, 'retryable', isTrue),
+        ),
+      );
+      expectNothingInstalled(registry, model);
     });
 
-    test('installs the diarization pair from archive plus bare file', () async {
-      const segmentation = SherpaArchivedFileModel.pyannoteSegmentation;
+    test('a download of another size installs nothing', () async {
+      final archive = completeArchive();
+      for (final bytes in <int>[archive.length + 1, archive.length - 1]) {
+        final model = modelFor(archive, bytes: bytes);
+        final registry = SherpaModelRegistry(
+          root: root,
+          httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
+        );
+        await expectLater(
+          registry.installRecognition(model),
+          throwsA(
+            isA<SpeechFailure>().having(
+              (f) => f.code,
+              'code',
+              'sherpa_model_download_incomplete',
+            ),
+          ),
+          reason: 'expected $bytes bytes, got ${archive.length}',
+        );
+        expectNothingInstalled(registry, model);
+      }
+    });
+
+    test('a short body without a length header installs nothing', () async {
+      final archive = completeArchive();
+      final model = modelFor(archive);
+      final registry = SherpaModelRegistry(
+        root: root,
+        httpClientFactory: () => _FakeClient({
+          model.archiveUrl: Uint8List.sublistView(archive, 0, 10),
+        }, sendLength: false),
+      );
+
+      await expectLater(
+        registry.installRecognition(model),
+        throwsA(
+          isA<SpeechFailure>().having(
+            (f) => f.code,
+            'code',
+            'sherpa_model_download_incomplete',
+          ),
+        ),
+      );
+      expectNothingInstalled(registry, model);
+    });
+
+    test('an interrupted download installs nothing', () async {
+      final archive = completeArchive();
+      final model = modelFor(archive);
+      final registry = SherpaModelRegistry(
+        root: root,
+        httpClientFactory: () =>
+            _FakeClient({model.archiveUrl: archive}, failAfterFirstChunk: true),
+      );
+
+      await expectLater(
+        registry.installRecognition(model),
+        throwsA(isA<http.ClientException>()),
+      );
+      expectNothingInstalled(registry, model);
+    });
+
+    test('cancelling a download installs nothing', () async {
+      final archive = completeArchive();
+      final model = modelFor(archive);
+      final controller = AudioCancellationController();
       final client = _FakeClient({
-        segmentation.archiveUrl: buildArchive(<String, String>{
-          segmentation.modelFile: 'segmentation-model',
-        }),
-        SherpaFileModel.wespeakerResnet34.url: Uint8List.fromList(<int>[9, 9]),
-      });
+        model.archiveUrl: archive,
+      }, holdAfterFirstChunk: true);
       final registry = SherpaModelRegistry(
         root: root,
         httpClientFactory: () => client,
       );
 
-      final paths = await registry.installDiarization();
-
-      expect(File(paths.segmentation).existsSync(), isTrue);
-      expect(File(paths.embedding).existsSync(), isTrue);
-      expect(
-        client.requested,
-        containsAll(<String>[
-          segmentation.archiveUrl,
-          SherpaFileModel.wespeakerResnet34.url,
-        ]),
+      final install = registry.installRecognition(
+        model,
+        cancellationToken: controller.token,
+        onProgress: (progress) {
+          if (progress > 0) controller.cancel();
+        },
       );
+
+      await expectLater(install, throwsA(isA<AudioCancelledException>()));
+      expect(client.closed, isTrue, reason: 'the transfer is aborted');
+      expectNothingInstalled(registry, model);
+    });
+
+    test('a later install replaces a half-written earlier one', () async {
+      final archive = completeArchive();
+      final model = modelFor(archive);
+      final stale = SherpaModelRegistry(root: root).recognitionDirectory(model)
+        ..createSync(recursive: true);
+      File('${stale.path}/stale.onnx').writeAsStringSync('left over');
+      final registry = SherpaModelRegistry(
+        root: root,
+        httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
+      );
+
+      await registry.installRecognition(model);
+
+      expect(File('${stale.path}/stale.onnx').existsSync(), isFalse);
+      expect(registry.resolveRecognition(model), isNotNull);
+    });
+
+    test('downloads the bare Silero VAD file after checking it', () async {
+      final body = Uint8List.fromList(<int>[1, 2, 3, 4]);
+      final registry = SherpaModelRegistry(
+        root: root,
+        httpClientFactory: () =>
+            _FakeClient({SherpaFileModel.sileroVad.url: body}),
+      );
+
+      // The fake body is not the real Silero VAD, so the catalog's size
+      // rejects it.
+      await expectLater(
+        registry.installVad(),
+        throwsA(
+          isA<SpeechFailure>().having(
+            (f) => f.code,
+            'code',
+            'sherpa_model_download_incomplete',
+          ),
+        ),
+      );
+      expect(registry.resolveVad(), isNull);
     });
 
     test('reports a retryable failure for a server error', () async {
@@ -203,15 +340,7 @@ void main() {
               .having((f) => f.retryable, 'retryable', isTrue),
         ),
       );
-      // A failed download must not leave a partial file behind.
-      expect(
-        registry.supportDirectory.existsSync()
-            ? registry.supportDirectory.listSync().where(
-                (e) => e.path.endsWith('.part'),
-              )
-            : const <FileSystemEntity>[],
-        isEmpty,
-      );
+      expect(registry.resolveVad(), isNull);
     });
 
     test('reports a non-retryable failure for a client error', () async {
@@ -230,15 +359,13 @@ void main() {
     });
 
     test('fails when the archive lacks the expected files', () async {
-      const model = SherpaRecognitionModel.parakeetTdtV3;
-      final client = _FakeClient({
-        model.archiveUrl: buildArchive(<String, String>{
-          '${model.unpackedDirName}/README.md': 'nothing useful',
-        }),
+      final archive = buildArchive(<String, String>{
+        'test-transducer/README.md': 'nothing useful',
       });
+      final model = modelFor(archive);
       final registry = SherpaModelRegistry(
         root: root,
-        httpClientFactory: () => client,
+        httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
       );
 
       await expectLater(
@@ -251,41 +378,35 @@ void main() {
           ),
         ),
       );
+      expectNothingInstalled(registry, model);
     });
 
     test('ignores archive entries that escape the destination', () async {
-      final client = _FakeClient({
-        SherpaArchivedFileModel.pyannoteSegmentation.archiveUrl:
-            buildArchive(<String, String>{
-              '../escaped.onnx': 'nope',
-              SherpaArchivedFileModel.pyannoteSegmentation.modelFile: 'ok',
-            }),
-        SherpaFileModel.wespeakerResnet34.url: Uint8List.fromList(<int>[1]),
+      final archive = buildArchive(<String, String>{
+        '../escaped.onnx': 'nope',
+        'test-transducer/encoder.onnx': 'e',
+        'test-transducer/decoder.onnx': 'd',
+        'test-transducer/joiner.onnx': 'j',
+        'test-transducer/tokens.txt': 't',
       });
+      final model = modelFor(archive);
       final registry = SherpaModelRegistry(
         root: root,
-        httpClientFactory: () => client,
+        httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
       );
 
-      await registry.installDiarization();
+      await registry.installRecognition(model);
 
       expect(File('${root.path}/escaped.onnx').existsSync(), isFalse);
       expect(File('${root.parent.path}/escaped.onnx').existsSync(), isFalse);
     });
 
     test('uninstall removes an installed model directory', () async {
-      const model = SherpaRecognitionModel.parakeetTdtV3;
-      final client = _FakeClient({
-        model.archiveUrl: buildArchive(<String, String>{
-          '${model.unpackedDirName}/${model.encoderFile}': 'e',
-          '${model.unpackedDirName}/${model.decoderFile}': 'd',
-          '${model.unpackedDirName}/${model.joinerFile}': 'j',
-          '${model.unpackedDirName}/${model.tokensFile}': 't',
-        }),
-      });
+      final archive = completeArchive();
+      final model = modelFor(archive);
       final registry = SherpaModelRegistry(
         root: root,
-        httpClientFactory: () => client,
+        httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
       );
 
       await registry.installRecognition(model);
@@ -316,6 +437,29 @@ void main() {
       }
     });
 
+    test('every entry records its exact size and a well-formed digest', () {
+      final digest = RegExp(r'^[0-9a-f]{64}$');
+      for (final model in SherpaRecognitionModel.all) {
+        expect(model.archiveBytes, greaterThan(0), reason: model.id);
+        if (model.archiveSha256 case final sha?) {
+          expect(sha, matches(digest), reason: model.id);
+        }
+        // IDs match the upstream archive, so a wrong one is a broken URL.
+        expect(model.archiveUrl, endsWith('/${model.id}.tar.bz2'));
+        expect(model.unpackedDirName, model.id);
+      }
+      for (final model in <SherpaFileModel>[
+        SherpaFileModel.sileroVad,
+        SherpaFileModel.wespeakerResnet34,
+      ]) {
+        expect(model.sha256, matches(digest), reason: model.id);
+      }
+    });
+
+    test('the batch default is checked by digest', () {
+      expect(SherpaRecognitionModel.defaultModel.archiveSha256, isNotNull);
+    });
+
     test('transducers declare a joiner and Whisper models do not', () {
       for (final model in SherpaRecognitionModel.all) {
         switch (model.kind) {
@@ -332,11 +476,29 @@ void main() {
 
 /// Serves canned bodies and records which URLs were requested.
 final class _FakeClient extends http.BaseClient {
-  _FakeClient(this._bodies, {this.statusCode = 200});
+  _FakeClient(
+    this._bodies, {
+    this.statusCode = 200,
+    this.sendLength = true,
+    this.failAfterFirstChunk = false,
+    this.holdAfterFirstChunk = false,
+  });
 
   final Map<String, Uint8List> _bodies;
   final int statusCode;
+
+  /// Whether the response declares its length.
+  final bool sendLength;
+
+  /// Whether the body breaks off with an error after its first chunk.
+  final bool failAfterFirstChunk;
+
+  /// Whether the body stalls after its first chunk until the client closes.
+  final bool holdAfterFirstChunk;
+
   final List<String> requested = <String>[];
+  bool closed = false;
+  final _hold = Completer<void>();
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
@@ -344,10 +506,29 @@ final class _FakeClient extends http.BaseClient {
     requested.add(url);
     final body = _bodies[url] ?? Uint8List(0);
     return http.StreamedResponse(
-      Stream<List<int>>.value(body),
+      _chunks(body),
       statusCode,
-      contentLength: body.length,
+      contentLength: sendLength ? body.length : null,
       request: request,
     );
+  }
+
+  Stream<List<int>> _chunks(Uint8List body) async* {
+    final half = body.length ~/ 2;
+    yield Uint8List.sublistView(body, 0, half);
+    if (failAfterFirstChunk) {
+      throw http.ClientException('Connection reset');
+    }
+    if (holdAfterFirstChunk) {
+      await _hold.future;
+      throw http.ClientException('Connection closed');
+    }
+    yield Uint8List.sublistView(body, half);
+  }
+
+  @override
+  void close() {
+    closed = true;
+    if (!_hold.isCompleted) _hold.complete();
   }
 }
