@@ -302,27 +302,95 @@ void main() {
       expect(registry.resolveRecognition(model), isNotNull);
     });
 
-    test('downloads the bare Silero VAD file after checking it', () async {
+    test(
+      'the catalog size rejects a download that is not Silero VAD',
+      () async {
+        final body = Uint8List.fromList(<int>[1, 2, 3, 4]);
+        final registry = SherpaModelRegistry(
+          root: root,
+          httpClientFactory: () =>
+              _FakeClient({SherpaFileModel.sileroVad.url: body}),
+        );
+
+        // The fake body is not the real Silero VAD, so the catalog's size
+        // rejects it.
+        await expectLater(
+          registry.installVad(),
+          throwsA(
+            isA<SpeechFailure>().having(
+              (f) => f.code,
+              'code',
+              'sherpa_model_download_incomplete',
+            ),
+          ),
+        );
+        expect(registry.resolveVad(), isNull);
+      },
+    );
+
+    test('downloads, verifies and installs the bare VAD file', () async {
       final body = Uint8List.fromList(<int>[1, 2, 3, 4]);
+      final vad = SherpaFileModel(
+        id: 'test-vad',
+        displayName: 'Test VAD',
+        url: 'https://example.test/vad.onnx',
+        fileName: 'vad.onnx',
+        sizeBytes: body.length,
+        sha256: crypto.sha256.convert(body).toString(),
+      );
       final registry = SherpaModelRegistry(
         root: root,
-        httpClientFactory: () =>
-            _FakeClient({SherpaFileModel.sileroVad.url: body}),
+        httpClientFactory: () => _FakeClient({vad.url: body}),
+        vadModel: vad,
       );
 
-      // The fake body is not the real Silero VAD, so the catalog's size
-      // rejects it.
-      await expectLater(
-        registry.installVad(),
-        throwsA(
-          isA<SpeechFailure>().having(
-            (f) => f.code,
-            'code',
-            'sherpa_model_download_incomplete',
-          ),
-        ),
+      final path = await registry.installVad();
+
+      expect(File(path).readAsBytesSync(), <int>[1, 2, 3, 4]);
+      expect(registry.resolveVad(), path);
+      expect(Directory('${root.path}/.staging').listSync(), isEmpty);
+    });
+
+    test('installs the diarization pair from archive plus bare file', () async {
+      final archive = buildArchive(<String, String>{
+        'segmentation/model.onnx': 'segmentation-model',
+      });
+      final segmentation = SherpaArchivedFileModel(
+        id: 'test-segmentation',
+        displayName: 'Test segmentation',
+        archiveUrl: 'https://example.test/segmentation.tar.bz2',
+        archiveBytes: archive.length,
+        archiveSha256: crypto.sha256.convert(archive).toString(),
+        modelFile: 'segmentation/model.onnx',
       );
-      expect(registry.resolveVad(), isNull);
+      final embeddingBody = Uint8List.fromList(<int>[9, 9]);
+      final embedding = SherpaFileModel(
+        id: 'test-embedding',
+        displayName: 'Test embedding',
+        url: 'https://example.test/embedding.onnx',
+        fileName: 'embedding.onnx',
+        sizeBytes: embeddingBody.length,
+      );
+      final client = _FakeClient({
+        segmentation.archiveUrl: archive,
+        embedding.url: embeddingBody,
+      });
+      final registry = SherpaModelRegistry(
+        root: root,
+        httpClientFactory: () => client,
+        segmentationModel: segmentation,
+        embeddingModel: embedding,
+      );
+
+      final paths = await registry.installDiarization();
+
+      expect(File(paths.segmentation).readAsStringSync(), 'segmentation-model');
+      expect(File(paths.embedding).readAsBytesSync(), <int>[9, 9]);
+      expect(paths.embeddingModelId, 'test-embedding');
+      expect(
+        client.requested,
+        containsAll(<String>[segmentation.archiveUrl, embedding.url]),
+      );
     });
 
     test('reports a retryable failure for a server error', () async {

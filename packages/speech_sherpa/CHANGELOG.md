@@ -13,6 +13,9 @@
   `AudioCancellationToken`; cancelling aborts the download and throws
   `AudioCancelledException`.
 - The archive is no longer held in the caller's isolate during extraction.
+- `SherpaModelRegistry` takes the VAD, segmentation and embedding models as
+  test-only parameters that default to the catalog. Every addition is
+  optional, so existing calls are unchanged.
 - Fix the Parakeet TDT 0.6B v2 and Whisper turbo entries, whose download URLs
   returned 404: their IDs are now `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8`
   and `sherpa-onnx-whisper-turbo`, matching the upstream archives.

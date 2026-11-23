@@ -12,6 +12,7 @@ import 'dart:isolate';
 import 'package:archive/archive.dart';
 import 'package:audio_core/audio_core.dart';
 import 'package:crypto/crypto.dart' as crypto;
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:speech_core/speech_core.dart' show SpeechFailure;
@@ -37,10 +38,27 @@ typedef SherpaInstallProgress = void Function(double progress);
 /// unresolved until a later install succeeds.
 final class SherpaModelRegistry {
   /// Creates a registry rooted at [root].
+  ///
+  /// [vadModel], [segmentationModel] and [embeddingModel] are the catalog
+  /// entries; tests replace them with entries whose size and digest describe
+  /// a fake download.
   SherpaModelRegistry({
     required this.root,
     SherpaHttpClientFactory? httpClientFactory,
+    @visibleForTesting this.vadModel = SherpaFileModel.sileroVad,
+    @visibleForTesting
+    this.segmentationModel = SherpaArchivedFileModel.pyannoteSegmentation,
+    @visibleForTesting this.embeddingModel = SherpaFileModel.wespeakerResnet34,
   }) : _httpClientFactory = httpClientFactory ?? http.Client.new;
+
+  /// The voice-activity model [installVad] installs.
+  final SherpaFileModel vadModel;
+
+  /// The diarization segmenter [installDiarization] installs.
+  final SherpaArchivedFileModel segmentationModel;
+
+  /// The speaker-embedding model [installDiarization] installs.
+  final SherpaFileModel embeddingModel;
 
   /// Directory that holds every installed model.
   final Directory root;
@@ -86,22 +104,17 @@ final class SherpaModelRegistry {
 
   /// Resolves the Silero VAD model path when installed, else null.
   String? resolveVad() {
-    final file = File(
-      p.join(supportDirectory.path, SherpaFileModel.sileroVad.fileName),
-    );
+    final file = File(p.join(supportDirectory.path, vadModel.fileName));
     return file.existsSync() ? file.path : null;
   }
 
   /// Resolves the diarization pair when both files are present, else null.
   SherpaDiarizationModelPaths? resolveDiarization() {
     final segmentation = File(
-      p.join(
-        supportDirectory.path,
-        SherpaArchivedFileModel.pyannoteSegmentation.modelFile,
-      ),
+      p.join(supportDirectory.path, segmentationModel.modelFile),
     );
     final embedding = File(
-      p.join(supportDirectory.path, SherpaFileModel.wespeakerResnet34.fileName),
+      p.join(supportDirectory.path, embeddingModel.fileName),
     );
     if (!segmentation.existsSync() || !embedding.existsSync()) {
       return null;
@@ -109,7 +122,7 @@ final class SherpaModelRegistry {
     return SherpaDiarizationModelPaths(
       segmentation: segmentation.path,
       embedding: embedding.path,
-      embeddingModelId: SherpaFileModel.wespeakerResnet34.id,
+      embeddingModelId: embeddingModel.id,
     );
   }
 
@@ -166,7 +179,7 @@ final class SherpaModelRegistry {
       return existing;
     }
     await _installFile(
-      model: SherpaFileModel.sileroVad,
+      model: vadModel,
       onProgress: onProgress,
       cancellationToken: cancellationToken,
     );
@@ -191,7 +204,7 @@ final class SherpaModelRegistry {
       onProgress?.call(1);
       return existing;
     }
-    const segmentation = SherpaArchivedFileModel.pyannoteSegmentation;
+    final segmentation = segmentationModel;
     await _installArchive(
       name: segmentation.displayName,
       url: segmentation.archiveUrl,
@@ -205,7 +218,7 @@ final class SherpaModelRegistry {
       cancellationToken: cancellationToken,
     );
     await _installFile(
-      model: SherpaFileModel.wespeakerResnet34,
+      model: embeddingModel,
       onProgress: onProgress == null
           ? null
           : (progress) => onProgress(0.5 + progress * 0.5),
