@@ -9,6 +9,12 @@
   `sherpa_model_download_corrupt`, extraction happens in a `.staging`
   directory, and files move into place only once complete. A failed install
   leaves nothing behind.
+- A recognition install writes `.speech_sherpa_install.json` with each
+  file's size, and `resolveRecognition` returns a model only while every file
+  still matches it. A truncated or deleted file, or a directory without the
+  manifest, reads as not installed, so a broken model never reaches the
+  native loader, which aborts or hangs the process instead of throwing.
+  Directories installed by 0.1.x have no manifest and install again.
 - `installRecognition`, `installVad` and `installDiarization` take an
   `AudioCancellationToken`; cancelling aborts the download and throws
   `AudioCancelledException`.

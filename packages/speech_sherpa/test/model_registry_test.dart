@@ -11,6 +11,8 @@ import 'package:http/http.dart' as http;
 import 'package:speech_core/speech_core.dart';
 import 'package:speech_sherpa/speech_sherpa.dart';
 
+import 'support/fakes.dart';
+
 void main() {
   late Directory root;
 
@@ -45,10 +47,16 @@ void main() {
       File('${dir.path}/${model.encoderFile}').writeAsStringSync('e');
       File('${dir.path}/${model.decoderFile}').writeAsStringSync('d');
       File('${dir.path}/${model.tokensFile}').writeAsStringSync('t');
-      // The joiner is still missing, so a transducer is not usable yet.
+      File('${dir.path}/${model.joinerFile}').writeAsStringSync('j');
+      // Every file is there, but no verified install recorded them.
       expect(registry.resolveRecognition(model), isNull);
 
-      File('${dir.path}/${model.joinerFile}').writeAsStringSync('j');
+      writeInstallManifest(dir, <String>[
+        model.encoderFile,
+        model.decoderFile,
+        model.tokensFile,
+        model.joinerFile!,
+      ]);
       final resolved = registry.resolveRecognition(model);
       expect(resolved, isNotNull);
       expect(resolved!.joiner, isNotNull);
@@ -63,6 +71,11 @@ void main() {
       File('${dir.path}/${model.encoderFile}').writeAsStringSync('e');
       File('${dir.path}/${model.decoderFile}').writeAsStringSync('d');
       File('${dir.path}/${model.tokensFile}').writeAsStringSync('t');
+      writeInstallManifest(dir, <String>[
+        model.encoderFile,
+        model.decoderFile,
+        model.tokensFile,
+      ]);
 
       final resolved = registry.resolveRecognition(model);
       expect(resolved, isNotNull);
@@ -283,6 +296,56 @@ void main() {
       await expectLater(install, throwsA(isA<AudioCancelledException>()));
       expect(client.closed, isTrue, reason: 'the transfer is aborted');
       expectNothingInstalled(registry, model);
+    });
+
+    group('a verified install stops resolving when', () {
+      late SherpaModelRegistry registry;
+      late SherpaRecognitionModel model;
+      late Directory dir;
+
+      setUp(() async {
+        final archive = completeArchive();
+        model = modelFor(archive);
+        registry = SherpaModelRegistry(
+          root: root,
+          httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
+        );
+        await registry.installRecognition(model);
+        dir = registry.recognitionDirectory(model);
+        expect(registry.resolveRecognition(model), isNotNull);
+      });
+
+      test('a file is truncated', () {
+        // A truncated model reaches the native loader, which aborts or hangs
+        // the process instead of throwing.
+        File('${dir.path}/encoder.onnx').writeAsStringSync('enc');
+        expect(registry.resolveRecognition(model), isNull);
+      });
+
+      test('a file is deleted', () {
+        File('${dir.path}/joiner.onnx').deleteSync();
+        expect(registry.resolveRecognition(model), isNull);
+      });
+
+      test('the manifest records other sizes', () {
+        writeInstallManifest(dir, <String>['encoder.onnx', 'decoder.onnx']);
+        File('${dir.path}/encoder.onnx').writeAsStringSync('encoder, longer');
+        expect(registry.resolveRecognition(model), isNull);
+      });
+
+      test('the manifest is missing', () {
+        File(
+          '${dir.path}/${SherpaModelRegistry.installManifestFileName}',
+        ).deleteSync();
+        expect(registry.resolveRecognition(model), isNull);
+      });
+
+      test('the manifest is not valid JSON', () {
+        File(
+          '${dir.path}/${SherpaModelRegistry.installManifestFileName}',
+        ).writeAsStringSync('{');
+        expect(registry.resolveRecognition(model), isNull);
+      });
     });
 
     test('a later install replaces a half-written earlier one', () async {

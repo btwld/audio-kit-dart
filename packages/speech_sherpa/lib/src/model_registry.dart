@@ -6,6 +6,7 @@
 // Audio Kit's own.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
@@ -72,7 +73,20 @@ final class SherpaModelRegistry {
   /// Directory holding the shared single-file models.
   Directory get supportDirectory => Directory(p.join(root.path, 'support'));
 
-  /// Resolves [model] when every required file is present, else null.
+  /// Name of the file an install writes beside a recognition model's
+  /// files, recording each one's size.
+  static const String installManifestFileName = '.speech_sherpa_install.json';
+
+  /// Resolves [model] when a verified install left every required file at
+  /// the size it recorded, else null.
+  ///
+  /// The size check runs on every resolve and costs one `stat` per file, so a
+  /// file truncated or replaced after install reads as not installed instead
+  /// of reaching the native loader, which aborts or hangs the process on a
+  /// broken model rather than throwing. A directory without the manifest, from
+  /// an interrupted or manual install, is not installed either. Same-size
+  /// corruption is not detected; the archive's SHA-256 is checked only during
+  /// the install.
   SherpaRecognitionModelPaths? resolveRecognition(
     SherpaRecognitionModel model,
   ) {
@@ -85,13 +99,18 @@ final class SherpaModelRegistry {
         ? null
         : File(p.join(dir.path, joinerName));
 
-    final complete =
-        encoder.existsSync() &&
-        decoder.existsSync() &&
-        tokens.existsSync() &&
-        (joiner == null || joiner.existsSync());
-    if (!complete) {
+    final sizes = _readManifest(dir);
+    if (sizes == null) {
       return null;
+    }
+    for (final file in <File?>[encoder, decoder, tokens, joiner]) {
+      if (file == null) continue;
+      final recorded = sizes[p.basename(file.path)];
+      if (recorded == null ||
+          !file.existsSync() ||
+          file.lengthSync() != recorded) {
+        return null;
+      }
     }
     return SherpaRecognitionModelPaths(
       model: model,
@@ -146,6 +165,7 @@ final class SherpaModelRegistry {
       expectedBytes: model.archiveBytes,
       expectedSha256: model.archiveSha256,
       destination: root,
+      manifestDirectory: model.unpackedDirName,
       // The archive unpacks into one directory, which must hold every file.
       required: <String>[
         p.join(model.unpackedDirName, model.encoderFile),
@@ -286,6 +306,7 @@ final class SherpaModelRegistry {
     required String? expectedSha256,
     required Directory destination,
     required List<String> required,
+    String? manifestDirectory,
     SherpaInstallProgress? onProgress,
     AudioCancellationToken? cancellationToken,
   }) async {
@@ -319,6 +340,16 @@ final class SherpaModelRegistry {
           );
         }
       }
+      if (manifestDirectory != null) {
+        _writeManifest(
+          Directory(p.join(unpacked.path, manifestDirectory)),
+          <String>[
+            for (final file in required)
+              if (p.split(file).first == manifestDirectory)
+                p.relative(file, from: manifestDirectory),
+          ],
+        );
+      }
       await destination.create(recursive: true);
       // Each top-level entry replaces what was there, so a half-written
       // earlier attempt never mixes with this one.
@@ -334,6 +365,41 @@ final class SherpaModelRegistry {
     } finally {
       await _discard(staging);
     }
+  }
+
+  /// Records the size of each of [files] in [directory]'s manifest. It is
+  /// written in staging, so it moves into place with the files it describes.
+  static void _writeManifest(Directory directory, List<String> files) {
+    File(p.join(directory.path, installManifestFileName)).writeAsStringSync(
+      jsonEncode(<String, Object>{
+        'version': 1,
+        'files': <String, int>{
+          for (final file in files)
+            file: File(p.join(directory.path, file)).lengthSync(),
+        },
+      }),
+    );
+  }
+
+  /// The recorded file sizes, or null when the manifest is missing or
+  /// unreadable.
+  static Map<String, int>? _readManifest(Directory directory) {
+    final manifest = File(p.join(directory.path, installManifestFileName));
+    if (!manifest.existsSync()) {
+      return null;
+    }
+    try {
+      final json = jsonDecode(manifest.readAsStringSync());
+      if (json case {'version': 1, 'files': final Map<String, Object?> files}) {
+        return <String, int>{
+          for (final MapEntry(:key, :value) in files.entries)
+            if (value is int) key: value,
+        };
+      }
+    } on FormatException {
+      return null;
+    }
+    return null;
   }
 
   /// Moves verified [staged] content to [target], replacing it.

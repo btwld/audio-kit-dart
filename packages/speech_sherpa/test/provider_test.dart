@@ -38,6 +38,12 @@ void main() {
     if (joiner != null) {
       File('${dir.path}/$joiner').writeAsStringSync('joiner');
     }
+    writeInstallManifest(dir, <String>[
+      model.encoderFile,
+      model.decoderFile,
+      model.tokensFile,
+      ?joiner,
+    ]);
   }
 
   void installDiarization() {

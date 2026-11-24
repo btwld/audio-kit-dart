@@ -120,6 +120,15 @@ interrupted or cancelled install leaves nothing behind, so the model stays
 unresolved. Every `install*` method takes an `AudioCancellationToken`; a
 cancelled install throws `AudioCancelledException`.
 
+A recognition install also writes `.speech_sherpa_install.json` beside the
+model's files, recording each file's size. `resolveRecognition` returns the
+model only when that manifest is present and every file still has its recorded
+size. A file truncated or deleted after install, or a directory nobody
+installed, therefore reads as not installed instead of reaching the native
+loader, which aborts or hangs the process on a broken model rather than
+throwing. Same-size corruption is not detected after install; the digest is
+checked only while installing.
+
 The streaming entries use the `chunk-16-left-128` export with an int8 encoder
 and joiner and an fp32 decoder, matching the upstream Flutter streaming example.
 The 20M variant is the low-power option for phones and single-board hosts, at
