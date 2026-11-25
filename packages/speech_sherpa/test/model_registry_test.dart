@@ -512,24 +512,163 @@ void main() {
       expectNothingInstalled(registry, model);
     });
 
-    test('ignores archive entries that escape the destination', () async {
-      final archive = buildArchive(<String, String>{
+    group('an archive entry that escapes the destination', () {
+      Uint8List escaping() => buildArchive(<String, String>{
         '../escaped.onnx': 'nope',
         'test-transducer/encoder.onnx': 'e',
         'test-transducer/decoder.onnx': 'd',
         'test-transducer/joiner.onnx': 'j',
         'test-transducer/tokens.txt': 't',
       });
+
+      void expectNotEscaped() {
+        expect(File('${root.path}/escaped.onnx').existsSync(), isFalse);
+        expect(File('${root.parent.path}/escaped.onnx').existsSync(), isFalse);
+      }
+
+      test('fails the install with the system tar', () async {
+        final archive = escaping();
+        final model = modelFor(archive);
+        final registry = SherpaModelRegistry(
+          root: root,
+          httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
+        );
+
+        await expectLater(
+          registry.installRecognition(model),
+          throwsA(
+            isA<SpeechFailure>().having(
+              (failure) => failure.code,
+              'code',
+              'sherpa_model_extract_failed',
+            ),
+          ),
+        );
+        expectNotEscaped();
+        expectNothingInstalled(registry, model);
+      }, skip: Platform.isMacOS || Platform.isLinux ? false : 'no system tar');
+
+      test('is skipped by the bundled decoder', () async {
+        final archive = escaping();
+        final model = modelFor(archive);
+        final registry = SherpaModelRegistry(
+          root: root,
+          httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
+          useSystemTar: false,
+        );
+
+        await registry.installRecognition(model);
+        expectNotEscaped();
+      });
+    });
+
+    test('the bundled decoder installs where there is no system tar', () async {
+      final archive = completeArchive();
+      final model = modelFor(archive);
+      final registry = SherpaModelRegistry(
+        root: root,
+        httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
+        useSystemTar: false,
+      );
+
+      final progress = <double>[];
+      final paths = await registry.installRecognition(
+        model,
+        onProgress: progress.add,
+      );
+
+      expect(File(paths.encoder).readAsStringSync(), 'encoder');
+      expect(progress.last, 1);
+    });
+
+    test(
+      'unpacking reports its progress after the download, up to 1',
+      () async {
+        final archive = completeArchive();
+        final model = modelFor(archive);
+        final registry = SherpaModelRegistry(
+          root: root,
+          httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
+        );
+
+        final progress = <double>[];
+        await registry.installRecognition(model, onProgress: progress.add);
+
+        final unpacking = progress.where((value) => value > 0.8).toList();
+        expect(unpacking, isNotEmpty, reason: 'unpacking is not silent');
+        expect(unpacking.last, 1);
+        for (var i = 1; i < progress.length; i++) {
+          expect(progress[i], greaterThanOrEqualTo(progress[i - 1]));
+        }
+      },
+      skip: Platform.isMacOS || Platform.isLinux ? false : 'no system tar',
+    );
+
+    test('an archive tar cannot read installs nothing', () async {
+      final archive = Uint8List.fromList(utf8.encode('not a bzip2 archive'));
       final model = modelFor(archive);
       final registry = SherpaModelRegistry(
         root: root,
         httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
       );
 
-      await registry.installRecognition(model);
+      await expectLater(
+        registry.installRecognition(model),
+        throwsA(
+          isA<SpeechFailure>().having(
+            (failure) => failure.code,
+            'code',
+            'sherpa_model_extract_failed',
+          ),
+        ),
+      );
+      expectNothingInstalled(registry, model);
+    }, skip: Platform.isMacOS || Platform.isLinux ? false : 'no system tar');
 
-      expect(File('${root.path}/escaped.onnx').existsSync(), isFalse);
-      expect(File('${root.parent.path}/escaped.onnx').existsSync(), isFalse);
+    group('a download that stalls fails as retryable, installing nothing,', () {
+      Matcher stalled() => throwsA(
+        isA<SpeechFailure>()
+            .having(
+              (failure) => failure.code,
+              'code',
+              'sherpa_model_download_stalled',
+            )
+            .having((failure) => failure.retryable, 'retryable', isTrue),
+      );
+
+      test('before the response arrives', () async {
+        final archive = completeArchive();
+        final model = modelFor(archive);
+        final client = _FakeClient({
+          model.archiveUrl: archive,
+        }, holdHeaders: true);
+        final registry = SherpaModelRegistry(
+          root: root,
+          httpClientFactory: () => client,
+          stallTimeout: const Duration(milliseconds: 50),
+        );
+
+        await expectLater(registry.installRecognition(model), stalled());
+        expect(client.closed, isTrue);
+        expectNothingInstalled(registry, model);
+      });
+
+      test('in the middle of the body', () async {
+        final archive = completeArchive();
+        final model = modelFor(archive);
+        final client = _FakeClient({
+          model.archiveUrl: archive,
+        }, holdAfterFirstChunk: true);
+        final registry = SherpaModelRegistry(
+          root: root,
+          httpClientFactory: () => client,
+          stallTimeout: const Duration(milliseconds: 50),
+        );
+
+        await expectLater(registry.installRecognition(model), stalled());
+        expect(client.closed, isTrue);
+        expectNothingInstalled(registry, model);
+      });
     });
 
     test('uninstall removes an installed model directory', () async {
@@ -613,6 +752,7 @@ final class _FakeClient extends http.BaseClient {
     this.sendLength = true,
     this.failAfterFirstChunk = false,
     this.holdAfterFirstChunk = false,
+    this.holdHeaders = false,
   });
 
   final Map<String, Uint8List> _bodies;
@@ -627,6 +767,9 @@ final class _FakeClient extends http.BaseClient {
   /// Whether the body stalls after its first chunk until the client closes.
   final bool holdAfterFirstChunk;
 
+  /// Whether the response never arrives, as on a connection that hangs.
+  final bool holdHeaders;
+
   final List<String> requested = <String>[];
   bool closed = false;
   final _hold = Completer<void>();
@@ -635,6 +778,7 @@ final class _FakeClient extends http.BaseClient {
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     final url = request.url.toString();
     requested.add(url);
+    if (holdHeaders) await Completer<void>().future;
     final body = _bodies[url] ?? Uint8List(0);
     return http.StreamedResponse(
       _chunks(body),

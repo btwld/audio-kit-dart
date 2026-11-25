@@ -118,7 +118,11 @@ under the registry root, rejects a download whose size or digest differs,
 extracts there, and only then moves the files into place. A short, corrupt,
 interrupted or cancelled install leaves nothing behind, so the model stays
 unresolved. Every `install*` method takes an `AudioCancellationToken`; a
-cancelled install throws `AudioCancelledException`.
+cancelled install throws `AudioCancelledException`. A download that
+receives nothing for `stallTimeout` (30 s by default) fails as
+`sherpa_model_download_stalled`. Archives unpack with the system's `tar`
+where there is one, which reports progress; elsewhere the bundled decoder
+unpacks them.
 
 A recognition install also writes `.speech_sherpa_install.json` beside the
 model's files, recording each file's size. `resolveRecognition` returns the

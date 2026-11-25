@@ -46,11 +46,23 @@ final class SherpaModelRegistry {
   SherpaModelRegistry({
     required this.root,
     SherpaHttpClientFactory? httpClientFactory,
+    this.stallTimeout = const Duration(seconds: 30),
+    @visibleForTesting bool useSystemTar = true,
     @visibleForTesting this.vadModel = SherpaFileModel.sileroVad,
     @visibleForTesting
     this.segmentationModel = SherpaArchivedFileModel.pyannoteSegmentation,
     @visibleForTesting this.embeddingModel = SherpaFileModel.wespeakerResnet34,
-  }) : _httpClientFactory = httpClientFactory ?? http.Client.new;
+  }) : _httpClientFactory = httpClientFactory ?? http.Client.new,
+       _systemTar = useSystemTar ? _findSystemTar() : null;
+
+  /// How long a download may wait for its connection or for its next bytes
+  /// before it fails as stalled, so a dropped connection never leaves an
+  /// install waiting forever.
+  final Duration stallTimeout;
+
+  /// The system's `tar`, which unpacks an archive in seconds; null where
+  /// there is none, and the bundled decoder unpacks it instead.
+  final String? _systemTar;
 
   /// The voice-activity model [installVad] installs.
   final SherpaFileModel vadModel;
@@ -326,10 +338,15 @@ final class SherpaModelRegistry {
         cancellationToken: cancellationToken,
       );
       final unpacked = Directory(p.join(staging.path, 'unpacked'));
-      // bzip2 decoding is opaque and CPU-bound; keep it and the archive's
-      // bytes off the caller's isolate so a UI stays responsive.
-      final archivePath = archive.path, unpackedPath = unpacked.path;
-      await Isolate.run(() => _extractTarBz2(archivePath, unpackedPath));
+      await _extract(
+        name: name,
+        archive: archive,
+        unpacked: unpacked,
+        onProgress: onProgress == null
+            ? null
+            : (progress) => onProgress(0.8 + progress * 0.2),
+        cancellationToken: cancellationToken,
+      );
       cancellationToken?.throwIfCancelled();
       for (final file in required) {
         if (!File(p.join(unpacked.path, file)).existsSync()) {
@@ -434,13 +451,38 @@ final class SherpaModelRegistry {
     final client = _httpClientFactory();
     // Closing the client aborts a request that is waiting on the network.
     final registration = cancellationToken?.register((_) => client.close());
+    // A watchdog closes the client when the connection or the body goes
+    // quiet for [stallTimeout]; the transfer then fails as stalled.
+    var stalled = false;
+    // Ends the wait for a response that never comes; closing the client does
+    // not end it on every transport.
+    final quiet = Completer<void>();
+    Timer? watchdog;
+    void watch() {
+      watchdog?.cancel();
+      watchdog = Timer(stallTimeout, () {
+        stalled = true;
+        client.close();
+        if (!quiet.isCompleted) quiet.complete();
+      });
+    }
+
     IOSink? sink;
     try {
       final http.StreamedResponse response;
+      watch();
       try {
-        response = await client.send(http.Request('GET', Uri.parse(url)));
+        response = await Future.any([
+          client.send(http.Request('GET', Uri.parse(url))),
+          // A request that never answers is not ended by closing the client
+          // on every transport; the watchdog's mark ends the wait.
+          Future<void>.delayed(
+            stallTimeout,
+          ).then<http.StreamedResponse>((_) => throw _stalled(name)),
+        ]);
       } on Object {
         cancellationToken?.throwIfCancelled();
+        if (stalled) throw _stalled(name);
         rethrow;
       }
       if (response.statusCode != 200) {
@@ -460,7 +502,9 @@ final class SherpaModelRegistry {
       sink = target.openWrite();
       var received = 0;
       try {
+        watch();
         await for (final chunk in response.stream) {
+          watch();
           cancellationToken?.throwIfCancelled();
           received += chunk.length;
           if (received > expectedBytes) {
@@ -472,8 +516,10 @@ final class SherpaModelRegistry {
         }
       } on Object {
         cancellationToken?.throwIfCancelled();
+        if (stalled) throw _stalled(name);
         rethrow;
       }
+      watchdog?.cancel();
       cancellationToken?.throwIfCancelled();
       await sink.flush();
       await sink.close();
@@ -491,9 +537,76 @@ final class SherpaModelRegistry {
         );
       }
     } finally {
+      watchdog?.cancel();
       registration?.dispose();
       await sink?.close();
       client.close();
+    }
+  }
+
+  static SpeechFailure _stalled(String name) => sherpaSpeechFailure(
+    'sherpa_model_download_stalled',
+    'install',
+    'The $name download stopped receiving data. Check the connection and '
+        'try again.',
+    retryable: true,
+  );
+
+  /// Unpacks [archive] into [unpacked], reporting how much of the archive
+  /// has been read. The system's `tar` reads it from a pipe, so progress
+  /// follows its decoding and cancelling stops it; without one, the bundled
+  /// bzip2 decoder runs off the caller's isolate, reporting only its end.
+  Future<void> _extract({
+    required String name,
+    required File archive,
+    required Directory unpacked,
+    SherpaInstallProgress? onProgress,
+    AudioCancellationToken? cancellationToken,
+  }) async {
+    await unpacked.create(recursive: true);
+    final tar = _systemTar;
+    if (tar == null) {
+      final archivePath = archive.path, unpackedPath = unpacked.path;
+      await Isolate.run(() => _extractTarBz2(archivePath, unpackedPath));
+      onProgress?.call(1);
+      return;
+    }
+    final process = await Process.start(tar, [
+      '-xjf',
+      '-',
+      '-C',
+      unpacked.path,
+    ]);
+    final registration = cancellationToken?.register((_) => process.kill());
+    try {
+      final errors = process.stderr.transform(utf8.decoder).join();
+      final output = process.stdout.drain<void>();
+      final total = await archive.length();
+      var read = 0;
+      try {
+        await process.stdin.addStream(
+          archive.openRead().map((chunk) {
+            read += chunk.length;
+            onProgress?.call(total == 0 ? 1 : read / total);
+            return chunk;
+          }),
+        );
+        await process.stdin.close();
+      } on Object {
+        // tar stopped reading; its exit code says why.
+      }
+      final code = await process.exitCode;
+      await output;
+      cancellationToken?.throwIfCancelled();
+      if (code != 0) {
+        throw sherpaSpeechFailure(
+          'sherpa_model_extract_failed',
+          'install',
+          'The $name archive could not be unpacked: ${(await errors).trim()}',
+        );
+      }
+    } finally {
+      registration?.dispose();
     }
   }
 
@@ -538,4 +651,27 @@ void _extractTarBz2(String archivePath, String destinationPath) {
     file.parent.createSync(recursive: true);
     file.writeAsBytesSync(entry.readBytes() ?? const <int>[]);
   }
+}
+
+/// The system's `tar` at its fixed path, never through `PATH`: macOS and
+/// Windows 10+ ship bsdtar, and Linux has GNU tar; both read bzip2 and
+/// refuse entries that leave the destination.
+String? _findSystemTar() {
+  final candidates = Platform.isMacOS
+      ? const ['/usr/bin/tar']
+      : Platform.isLinux
+      ? const ['/usr/bin/tar', '/bin/tar']
+      : Platform.isWindows
+      ? [
+          p.join(
+            Platform.environment['SystemRoot'] ?? r'C:\Windows',
+            'System32',
+            'tar.exe',
+          ),
+        ]
+      : const <String>[];
+  for (final candidate in candidates) {
+    if (File(candidate).existsSync()) return candidate;
+  }
+  return null;
 }

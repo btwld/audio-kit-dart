@@ -19,6 +19,15 @@
   `AudioCancellationToken`; cancelling aborts the download and throws
   `AudioCancelledException`.
 - The archive is no longer held in the caller's isolate during extraction.
+- Archives unpack with the system's `tar` (macOS, Linux, Windows 10+) read
+  from a pipe: about twice as fast as the bundled decoder on Parakeet v3,
+  without its 900 MB peak, reporting progress through the last 20% and
+  stopped by cancellation. An archive `tar` refuses, such as one with an
+  entry outside the destination, fails with `sherpa_model_extract_failed`.
+  Platforms without `tar` keep the bundled decoder.
+- A download that receives nothing for `stallTimeout` (30 s by default),
+  before or during its body, fails with the retryable
+  `sherpa_model_download_stalled` instead of waiting forever.
 - `SherpaModelRegistry` takes the VAD, segmentation and embedding models as
   test-only parameters that default to the catalog. Every addition is
   optional, so existing calls are unchanged.
