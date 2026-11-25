@@ -99,17 +99,39 @@ cannot resolve the library by leaf name can pass a directory to
 Nothing is bundled. The registry downloads on demand into a directory you
 supply, so the SDK never guesses at an application's storage layout.
 
-| Model | Kind | Approx. size | Languages |
-| --- | --- | --- | --- |
-| Parakeet TDT 0.6B v3 int8 (batch default) | transducer | 600 MB | 25 European |
-| Parakeet TDT 0.6B v2 int8 | transducer | 480 MB | English |
-| Whisper large-v3-turbo int8 | whisper | 626 MB | 99+ |
-| Whisper base.en int8 | whisper | 198 MB | English |
-| Streaming Zipformer 2023-06-26 (streaming default) | streaming transducer | 296 MB | English |
-| Streaming Zipformer 20M 2023-02-17 | streaming transducer | 122 MB | English |
-| Silero VAD | vad | 2 MB | — |
-| pyannote segmentation 3.0 | diarization | 9 MB | — |
-| WeSpeaker ResNet34 (VoxCeleb) | embedding | 26 MB | English |
+| Model | Kind | Download | SHA-256 checked | Languages |
+| --- | --- | --- | --- | --- |
+| Parakeet TDT 0.6B v3 int8 (batch default) | transducer | 487 MB | yes | 25 European |
+| Parakeet TDT 0.6B v2 int8 | transducer | 482 MB | yes | English |
+| Whisper turbo int8 | whisper | 564 MB | no | 99+ |
+| Whisper base.en int8 | whisper | 209 MB | no | English |
+| Streaming Zipformer 2023-06-26 (streaming default) | streaming transducer | 310 MB | no | English |
+| Streaming Zipformer 20M 2023-02-17 | streaming transducer | 128 MB | no | English |
+| Silero VAD | vad | 0.6 MB | yes | — |
+| pyannote segmentation 3.0 | diarization | 7 MB | no | — |
+| WeSpeaker ResNet34 (VoxCeleb) | embedding | 27 MB | yes | English |
+
+Each catalog entry records the exact download size, and its SHA-256 where the
+upstream release publishes one; the older k2-fsa assets publish none, so for
+them the size is the check. An install downloads into a `.staging` directory
+under the registry root, rejects a download whose size or digest differs,
+extracts there, and only then moves the files into place. A short, corrupt,
+interrupted or cancelled install leaves nothing behind, so the model stays
+unresolved. Every `install*` method takes an `AudioCancellationToken`; a
+cancelled install throws `AudioCancelledException`. A download that
+receives nothing for `stallTimeout` (30 s by default) fails as
+`sherpa_model_download_stalled`. Archives unpack with the system's `tar`
+where there is one, which reports progress; elsewhere the bundled decoder
+unpacks them.
+
+A recognition install also writes `.speech_sherpa_install.json` beside the
+model's files, recording each file's size. `resolveRecognition` returns the
+model only when that manifest is present and every file still has its recorded
+size. A file truncated or deleted after install, or a directory nobody
+installed, therefore reads as not installed instead of reaching the native
+loader, which aborts or hangs the process on a broken model rather than
+throwing. Same-size corruption is not detected after install; the digest is
+checked only while installing.
 
 The streaming entries use the `chunk-16-left-128` export with an int8 encoder
 and joiner and an fp32 decoder, matching the upstream Flutter streaming example.
@@ -160,7 +182,7 @@ one reads.
 
 Unit tests inject a fake `SherpaRuntime` and run without ONNX Runtime, model
 files, or isolates. Tests that exercise the real native path are gated behind an
-environment variable so CI never downloads 600 MB:
+environment variable so CI never downloads hundreds of megabytes:
 
 ```sh
 SPEECH_SHERPA_MODELS=~/models flutter test --tags integration

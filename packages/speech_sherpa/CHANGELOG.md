@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.2.0
+
+- Installs are verified and staged: every catalog entry records its exact
+  download size, and its SHA-256 where upstream publishes one (both Parakeet
+  models, Silero VAD and WeSpeaker). A download of another size or digest
+  fails with `sherpa_model_download_incomplete` or
+  `sherpa_model_download_corrupt`, extraction happens in a `.staging`
+  directory, and files move into place only once complete. A failed install
+  leaves nothing behind.
+- A recognition install writes `.speech_sherpa_install.json` with each
+  file's size, and `resolveRecognition` returns a model only while every file
+  still matches it. A truncated or deleted file, or a directory without the
+  manifest, reads as not installed, so a broken model never reaches the
+  native loader, which aborts or hangs the process instead of throwing.
+  Directories installed by 0.1.x have no manifest and install again.
+- `installRecognition`, `installVad` and `installDiarization` take an
+  `AudioCancellationToken`; cancelling aborts the download and throws
+  `AudioCancelledException`.
+- The archive is no longer held in the caller's isolate during extraction.
+- Archives unpack with the system's `tar` (macOS, Linux, Windows 10+) read
+  from a pipe: about twice as fast as the bundled decoder on Parakeet v3,
+  without its 900 MB peak, reporting progress through the last 20% and
+  stopped by cancellation. An archive `tar` refuses, such as one with an
+  entry outside the destination, fails with `sherpa_model_extract_failed`.
+  Platforms without `tar` keep the bundled decoder.
+- A download that receives nothing for `stallTimeout` (30 s by default),
+  before or during its body, fails with the retryable
+  `sherpa_model_download_stalled` instead of waiting forever.
+- `SherpaModelRegistry` takes the VAD, segmentation and embedding models as
+  test-only parameters that default to the catalog. Every addition is
+  optional, so existing calls are unchanged.
+- Fix the Parakeet TDT 0.6B v2 and Whisper turbo entries, whose download URLs
+  returned 404: their IDs are now `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8`
+  and `sherpa-onnx-whisper-turbo`, matching the upstream archives.
+
 ## 0.1.1
 
 - Update repository and issue links for the move to the concepta.dev publisher.

@@ -23,6 +23,7 @@ final class SherpaRecognitionModel {
     required this.encoderFile,
     required this.decoderFile,
     required this.tokensFile,
+    this.archiveSha256,
     this.joinerFile,
     this.languageTags = const <String>{},
     this.isMultilingual = false,
@@ -43,8 +44,13 @@ final class SherpaRecognitionModel {
   /// Download location of the `.tar.bz2` archive.
   final String archiveUrl;
 
-  /// Approximate archive size, used only for download progress.
+  /// Exact archive size in bytes. An install that receives any other size
+  /// fails without installing anything.
   final int archiveBytes;
+
+  /// Lowercase hex SHA-256 of the archive, when upstream publishes one. An
+  /// install that receives other bytes fails without installing anything.
+  final String? archiveSha256;
 
   /// Top-level directory the archive unpacks into.
   final String unpackedDirName;
@@ -79,7 +85,9 @@ final class SherpaRecognitionModel {
     archiveUrl:
         'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/'
         'sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2',
-    archiveBytes: 600 * 1024 * 1024,
+    archiveBytes: 487211443,
+    archiveSha256:
+        '1495e91b59d7fc53ddca91f3431758ec99f8fa253fdb0e1e851be0f72b14b0f9',
     unpackedDirName: 'sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8',
     encoderFile: 'encoder.int8.onnx',
     decoderFile: 'decoder.int8.onnx',
@@ -90,14 +98,16 @@ final class SherpaRecognitionModel {
 
   /// NVIDIA Parakeet TDT 0.6B v2 int8 — English only, smaller than v3.
   static const SherpaRecognitionModel parakeetTdtV2 = SherpaRecognitionModel(
-    id: 'sherpa-onnx-nemo-parakeet_tdt-0.6b-v2-int8',
+    id: 'sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8',
     displayName: 'Parakeet TDT 0.6B v2 (English)',
     kind: SherpaRecognitionModelKind.transducer,
     archiveUrl:
         'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/'
-        'sherpa-onnx-nemo-parakeet_tdt-0.6b-v2-int8.tar.bz2',
-    archiveBytes: 480 * 1024 * 1024,
-    unpackedDirName: 'sherpa-onnx-nemo-parakeet_tdt-0.6b-v2-int8',
+        'sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2',
+    archiveBytes: 482440461,
+    archiveSha256:
+        '6fc4426b54aa549a0019b8a75b8dea59164e71790a37ac56a045ad57f915f714',
+    unpackedDirName: 'sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8',
     encoderFile: 'encoder.int8.onnx',
     decoderFile: 'decoder.int8.onnx',
     joinerFile: 'joiner.int8.onnx',
@@ -108,17 +118,17 @@ final class SherpaRecognitionModel {
   /// Whisper large-v3-turbo int8 — the widest language coverage, slower.
   static const SherpaRecognitionModel whisperLargeV3Turbo =
       SherpaRecognitionModel(
-        id: 'sherpa-onnx-whisper-large-v3-turbo',
+        id: 'sherpa-onnx-whisper-turbo',
         displayName: 'Whisper large-v3-turbo (multilingual)',
         kind: SherpaRecognitionModelKind.whisper,
         archiveUrl:
             'https://github.com/k2-fsa/sherpa-onnx/releases/download/'
-            'asr-models/sherpa-onnx-whisper-large-v3-turbo.tar.bz2',
-        archiveBytes: 626 * 1024 * 1024,
-        unpackedDirName: 'sherpa-onnx-whisper-large-v3-turbo',
-        encoderFile: 'large-v3-turbo-encoder.int8.onnx',
-        decoderFile: 'large-v3-turbo-decoder.int8.onnx',
-        tokensFile: 'large-v3-turbo-tokens.txt',
+            'asr-models/sherpa-onnx-whisper-turbo.tar.bz2',
+        archiveBytes: 563790207,
+        unpackedDirName: 'sherpa-onnx-whisper-turbo',
+        encoderFile: 'turbo-encoder.int8.onnx',
+        decoderFile: 'turbo-decoder.int8.onnx',
+        tokensFile: 'turbo-tokens.txt',
         isMultilingual: true,
       );
 
@@ -130,7 +140,7 @@ final class SherpaRecognitionModel {
     archiveUrl:
         'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/'
         'sherpa-onnx-whisper-base.en.tar.bz2',
-    archiveBytes: 198 * 1024 * 1024,
+    archiveBytes: 208576005,
     unpackedDirName: 'sherpa-onnx-whisper-base.en',
     encoderFile: 'base.en-encoder.int8.onnx',
     decoderFile: 'base.en-decoder.int8.onnx',
@@ -225,6 +235,7 @@ final class SherpaFileModel {
     required this.url,
     required this.fileName,
     required this.sizeBytes,
+    this.sha256,
   });
 
   /// Stable model ID.
@@ -239,8 +250,13 @@ final class SherpaFileModel {
   /// File name written under the install directory.
   final String fileName;
 
-  /// Approximate size, used only for download progress.
+  /// Exact size in bytes. An install that receives any other size fails
+  /// without installing anything.
   final int sizeBytes;
+
+  /// Lowercase hex SHA-256 of the file, when upstream publishes one. An
+  /// install that receives other bytes fails without installing anything.
+  final String? sha256;
 
   /// Silero VAD v4, the speech gate used by [SherpaVoiceActivityOptions].
   static const SherpaFileModel sileroVad = SherpaFileModel(
@@ -250,7 +266,8 @@ final class SherpaFileModel {
         'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/'
         'silero_vad.onnx',
     fileName: 'silero_vad.onnx',
-    sizeBytes: 2 * 1024 * 1024,
+    sizeBytes: 643854,
+    sha256: '9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6',
   );
 
   /// WeSpeaker ResNet34 speaker-embedding model (VoxCeleb, English).
@@ -264,7 +281,8 @@ final class SherpaFileModel {
         'https://github.com/k2-fsa/sherpa-onnx/releases/download/'
         'speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx',
     fileName: 'wespeaker_en_voxceleb_resnet34_LM.onnx',
-    sizeBytes: 26 * 1024 * 1024,
+    sizeBytes: 26530550,
+    sha256: 'e9848563da86f263117134dfd7ad63c92355b37de492b55e325400c9d9c39012',
   );
 }
 
@@ -277,6 +295,7 @@ final class SherpaArchivedFileModel {
     required this.archiveUrl,
     required this.archiveBytes,
     required this.modelFile,
+    this.archiveSha256,
   });
 
   /// Stable model ID.
@@ -288,8 +307,12 @@ final class SherpaArchivedFileModel {
   /// Download location of the `.tar.bz2` archive.
   final String archiveUrl;
 
-  /// Approximate archive size, used only for download progress.
+  /// Exact archive size in bytes. An install that receives any other size
+  /// fails without installing anything.
   final int archiveBytes;
+
+  /// Lowercase hex SHA-256 of the archive, when upstream publishes one.
+  final String? archiveSha256;
 
   /// Model path relative to the install directory, including the archive's
   /// own top-level folder.
@@ -304,7 +327,7 @@ final class SherpaArchivedFileModel {
             'https://github.com/k2-fsa/sherpa-onnx/releases/download/'
             'speaker-segmentation-models/'
             'sherpa-onnx-pyannote-segmentation-3-0.tar.bz2',
-        archiveBytes: 9 * 1024 * 1024,
+        archiveBytes: 6958444,
         modelFile: 'sherpa-onnx-pyannote-segmentation-3-0/model.onnx',
       );
 }

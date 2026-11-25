@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:audio_core/audio_core.dart';
@@ -363,4 +365,21 @@ final class _FakeSourceSession implements AudioSourceSession {
       await _statuses.close();
     }
   }
+}
+
+/// Writes the install manifest a verified install leaves, recording the
+/// current size of each of [files] in [directory]. The on-disk format is the
+/// registry's contract; this helper pins it.
+void writeInstallManifest(Directory directory, List<String> files) {
+  File(
+    '${directory.path}/${SherpaModelRegistry.installManifestFileName}',
+  ).writeAsStringSync(
+    jsonEncode(<String, Object>{
+      'version': 1,
+      'files': <String, int>{
+        for (final file in files)
+          file: File('${directory.path}/$file').lengthSync(),
+      },
+    }),
+  );
 }
