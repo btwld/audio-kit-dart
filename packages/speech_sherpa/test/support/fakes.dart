@@ -370,10 +370,12 @@ final class _FakeSourceSession implements AudioSourceSession {
 /// Writes the install manifest a verified install leaves, recording the
 /// current size of each of [files] in [directory]. The on-disk format is the
 /// registry's contract; this helper pins it.
-void writeInstallManifest(Directory directory, List<String> files) {
-  File(
-    '${directory.path}/${SherpaModelRegistry.installManifestFileName}',
-  ).writeAsStringSync(
+void writeInstallManifest(
+  Directory directory,
+  List<String> files, {
+  String name = SherpaModelRegistry.installManifestFileName,
+}) {
+  File('${directory.path}/$name').writeAsStringSync(
     jsonEncode(<String, Object>{
       'version': 1,
       'files': <String, int>{

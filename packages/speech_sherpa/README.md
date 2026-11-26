@@ -115,14 +115,20 @@ Each catalog entry records the exact download size, and its SHA-256 where the
 upstream release publishes one; the older k2-fsa assets publish none, so for
 them the size is the check. An install downloads into a `.staging` directory
 under the registry root, rejects a download whose size or digest differs,
-extracts there, and only then moves the files into place. A short, corrupt,
-interrupted or cancelled install leaves nothing behind, so the model stays
-unresolved. Every `install*` method takes an `AudioCancellationToken`; a
-cancelled install throws `AudioCancelledException`. A download that
-receives nothing for `stallTimeout` (30 s by default) fails as
-`sherpa_model_download_stalled`. Archives unpack with the system's `tar`
-where there is one, which reports progress; elsewhere the bundled decoder
-unpacks them.
+extracts there, and only then moves the model's own directory into place;
+anything else the archive holds is discarded, so an install never touches
+other files under the root. A short, corrupt, interrupted or cancelled install
+leaves nothing behind, so the model stays unresolved, and staging left by a
+process that exited mid-install is removed by the next install. Every
+`install*` method takes an `AudioCancellationToken`; a cancelled install
+throws `AudioCancelledException`. A download that receives nothing for
+`stallTimeout` (30 s by default) fails as `sherpa_model_download_stalled`,
+and both the stall and cancellation end the install even on a transport
+that keeps its stream open after the client closes. The body is written with
+disk backpressure, so a slow disk slows the download instead of buffering it
+in memory. Archives unpack with the system's `tar` where there is one, which
+reports progress; elsewhere the bundled decoder unpacks them in a worker
+isolate that cancellation stops.
 
 A recognition install also writes `.speech_sherpa_install.json` beside the
 model's files, recording each file's size. `resolveRecognition` returns the
@@ -130,8 +136,16 @@ model only when that manifest is present and every file still has its recorded
 size. A file truncated or deleted after install, or a directory nobody
 installed, therefore reads as not installed instead of reaching the native
 loader, which aborts or hangs the process on a broken model rather than
-throwing. Same-size corruption is not detected after install; the digest is
-checked only while installing.
+throwing. A manifest that cannot be read or decoded also reads as not
+installed, and the next install replaces it. Same-size corruption is not
+detected after install; the digest is checked only while installing.
+
+`installDiarization` stages the segmentation and embedding models together
+and moves them into place only once both are verified, then writes
+`.speech_sherpa_diarization.json` in the support directory.
+`resolveDiarization` returns the pair only while that manifest is present and
+both files still have their recorded sizes, so a pair one of whose downloads
+failed never resolves, even beside an older file of the same name.
 
 The streaming entries use the `chunk-16-left-128` export with an int8 encoder
 and joiner and an fp32 decoder, matching the upstream Flutter streaming example.

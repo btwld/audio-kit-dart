@@ -89,6 +89,11 @@ final class SherpaModelRegistry {
   /// files, recording each one's size.
   static const String installManifestFileName = '.speech_sherpa_install.json';
 
+  /// Name of the file a diarization install writes in [supportDirectory],
+  /// recording the size of both files of the pair.
+  static const String diarizationManifestFileName =
+      '.speech_sherpa_diarization.json';
+
   /// Resolves [model] when a verified install left every required file at
   /// the size it recorded, else null.
   ///
@@ -96,40 +101,26 @@ final class SherpaModelRegistry {
   /// file truncated or replaced after install reads as not installed instead
   /// of reaching the native loader, which aborts or hangs the process on a
   /// broken model rather than throwing. A directory without the manifest, from
-  /// an interrupted or manual install, is not installed either. Same-size
-  /// corruption is not detected; the archive's SHA-256 is checked only during
-  /// the install.
+  /// an interrupted or manual install, is not installed either, nor is one
+  /// whose manifest cannot be read or decoded. Same-size corruption is not
+  /// detected; the archive's SHA-256 is checked only during the install.
   SherpaRecognitionModelPaths? resolveRecognition(
     SherpaRecognitionModel model,
   ) {
-    final dir = recognitionDirectory(model);
-    final encoder = File(p.join(dir.path, model.encoderFile));
-    final decoder = File(p.join(dir.path, model.decoderFile));
-    final tokens = File(p.join(dir.path, model.tokensFile));
-    final joinerName = model.joinerFile;
-    final joiner = joinerName == null
-        ? null
-        : File(p.join(dir.path, joinerName));
-
-    final sizes = _readManifest(dir);
-    if (sizes == null) {
+    final paths = _resolveVerified(
+      recognitionDirectory(model),
+      installManifestFileName,
+      _recognitionFiles(model),
+    );
+    if (paths == null) {
       return null;
-    }
-    for (final file in <File?>[encoder, decoder, tokens, joiner]) {
-      if (file == null) continue;
-      final recorded = sizes[p.basename(file.path)];
-      if (recorded == null ||
-          !file.existsSync() ||
-          file.lengthSync() != recorded) {
-        return null;
-      }
     }
     return SherpaRecognitionModelPaths(
       model: model,
-      encoder: encoder.path,
-      decoder: decoder.path,
-      tokens: tokens.path,
-      joiner: joiner?.path,
+      encoder: paths[0],
+      decoder: paths[1],
+      tokens: paths[2],
+      joiner: model.joinerFile == null ? null : paths[3],
     );
   }
 
@@ -139,26 +130,32 @@ final class SherpaModelRegistry {
     return file.existsSync() ? file.path : null;
   }
 
-  /// Resolves the diarization pair when both files are present, else null.
+  /// Resolves the diarization pair when one install completed both files and
+  /// each still has the size it recorded, else null.
+  ///
+  /// Both files are staged and verified before either moves into place, and
+  /// the manifest moves last, so a pair one of whose downloads failed never
+  /// resolves, even beside an older file of the same name.
   SherpaDiarizationModelPaths? resolveDiarization() {
-    final segmentation = File(
-      p.join(supportDirectory.path, segmentationModel.modelFile),
+    final paths = _resolveVerified(
+      supportDirectory,
+      diarizationManifestFileName,
+      _diarizationFiles,
     );
-    final embedding = File(
-      p.join(supportDirectory.path, embeddingModel.fileName),
-    );
-    if (!segmentation.existsSync() || !embedding.existsSync()) {
+    if (paths == null) {
       return null;
     }
     return SherpaDiarizationModelPaths(
-      segmentation: segmentation.path,
-      embedding: embedding.path,
+      segmentation: paths[0],
+      embedding: paths[1],
       embeddingModelId: embeddingModel.id,
     );
   }
 
   /// Installs [model], returning immediately when it is already present.
   ///
+  /// Only the archive's [SherpaRecognitionModel.unpackedDirName] directory
+  /// moves into [root]; anything else the archive holds is discarded.
   /// Cancelling [cancellationToken] stops the download and discards it,
   /// throwing [AudioCancelledException].
   Future<SherpaRecognitionModelPaths> installRecognition(
@@ -171,23 +168,25 @@ final class SherpaModelRegistry {
       onProgress?.call(1);
       return existing;
     }
-    await _installArchive(
+    await _installStaged(
       name: model.displayName,
-      url: model.archiveUrl,
-      expectedBytes: model.archiveBytes,
-      expectedSha256: model.archiveSha256,
       destination: root,
+      promote: <String>[model.unpackedDirName],
       manifestDirectory: model.unpackedDirName,
-      // The archive unpacks into one directory, which must hold every file.
-      required: <String>[
-        p.join(model.unpackedDirName, model.encoderFile),
-        p.join(model.unpackedDirName, model.decoderFile),
-        p.join(model.unpackedDirName, model.tokensFile),
-        if (model.joinerFile case final joiner?)
-          p.join(model.unpackedDirName, joiner),
-      ],
+      manifestFileName: installManifestFileName,
+      files: _recognitionFiles(model),
       onProgress: onProgress,
       cancellationToken: cancellationToken,
+      stage: (staging, unpacked) => _fetchArchive(
+        name: model.displayName,
+        url: model.archiveUrl,
+        expectedBytes: model.archiveBytes,
+        expectedSha256: model.archiveSha256,
+        staging: staging,
+        unpacked: unpacked,
+        onProgress: onProgress,
+        cancellationToken: cancellationToken,
+      ),
     );
     final resolved = resolveRecognition(model);
     if (resolved == null) {
@@ -210,11 +209,26 @@ final class SherpaModelRegistry {
       onProgress?.call(1);
       return existing;
     }
-    await _installFile(
-      model: vadModel,
-      onProgress: onProgress,
-      cancellationToken: cancellationToken,
-    );
+    final staging = await _openStaging();
+    try {
+      final staged = File(p.join(staging.directory.path, vadModel.fileName));
+      await _download(
+        name: vadModel.displayName,
+        url: vadModel.url,
+        expectedBytes: vadModel.sizeBytes,
+        expectedSha256: vadModel.sha256,
+        target: staged,
+        onProgress: onProgress,
+        cancellationToken: cancellationToken,
+      );
+      await _promote(
+        staged.path,
+        p.join(supportDirectory.path, vadModel.fileName),
+      );
+      onProgress?.call(1);
+    } finally {
+      await staging.discard();
+    }
     final resolved = resolveVad();
     if (resolved == null) {
       throw sherpaSpeechFailure(
@@ -227,6 +241,9 @@ final class SherpaModelRegistry {
   }
 
   /// Installs the pyannote and WeSpeaker pair used for diarization.
+  ///
+  /// Both downloads land in one staging directory and move into place only
+  /// after both are verified, so a failure in either installs nothing.
   Future<SherpaDiarizationModelPaths> installDiarization({
     SherpaInstallProgress? onProgress,
     AudioCancellationToken? cancellationToken,
@@ -237,24 +254,44 @@ final class SherpaModelRegistry {
       return existing;
     }
     final segmentation = segmentationModel;
-    await _installArchive(
-      name: segmentation.displayName,
-      url: segmentation.archiveUrl,
-      expectedBytes: segmentation.archiveBytes,
-      expectedSha256: segmentation.archiveSha256,
+    final segmentationDir = p.dirname(segmentation.modelFile);
+    await _installStaged(
+      name: 'diarization',
       destination: supportDirectory,
-      required: <String>[segmentation.modelFile],
-      onProgress: onProgress == null
-          ? null
-          : (progress) => onProgress(progress * 0.5),
+      promote: <String>[
+        if (segmentationDir == '.') segmentation.modelFile else segmentationDir,
+        embeddingModel.fileName,
+      ],
+      manifestDirectory: '',
+      manifestFileName: diarizationManifestFileName,
+      files: _diarizationFiles,
+      onProgress: onProgress,
       cancellationToken: cancellationToken,
-    );
-    await _installFile(
-      model: embeddingModel,
-      onProgress: onProgress == null
-          ? null
-          : (progress) => onProgress(0.5 + progress * 0.5),
-      cancellationToken: cancellationToken,
+      stage: (staging, unpacked) async {
+        await _fetchArchive(
+          name: segmentation.displayName,
+          url: segmentation.archiveUrl,
+          expectedBytes: segmentation.archiveBytes,
+          expectedSha256: segmentation.archiveSha256,
+          staging: staging,
+          unpacked: unpacked,
+          onProgress: onProgress == null
+              ? null
+              : (progress) => onProgress(progress * 0.5),
+          cancellationToken: cancellationToken,
+        );
+        await _download(
+          name: embeddingModel.displayName,
+          url: embeddingModel.url,
+          expectedBytes: embeddingModel.sizeBytes,
+          expectedSha256: embeddingModel.sha256,
+          target: File(p.join(unpacked.path, embeddingModel.fileName)),
+          onProgress: onProgress == null
+              ? null
+              : (progress) => onProgress(0.5 + progress * 0.5),
+          cancellationToken: cancellationToken,
+        );
+      },
     );
     final resolved = resolveDiarization();
     if (resolved == null) {
@@ -275,81 +312,89 @@ final class SherpaModelRegistry {
     }
   }
 
-  /// A fresh directory under [root] that one install downloads and extracts
-  /// into; nothing in it is visible to the resolvers.
-  Future<Directory> _stagingDirectory() async {
-    final staging = Directory(p.join(root.path, '.staging'));
-    await staging.create(recursive: true);
-    return staging.createTemp('install-');
-  }
+  /// The files a recognition install records, relative to the model's
+  /// directory, in the order [resolveRecognition] reads them.
+  static List<String> _recognitionFiles(SherpaRecognitionModel model) =>
+      <String>[
+        model.encoderFile,
+        model.decoderFile,
+        model.tokensFile,
+        ?model.joinerFile,
+      ];
 
-  Future<void> _installFile({
-    required SherpaFileModel model,
-    SherpaInstallProgress? onProgress,
-    AudioCancellationToken? cancellationToken,
-  }) async {
-    final staging = await _stagingDirectory();
+  /// The files a diarization install records, relative to
+  /// [supportDirectory].
+  List<String> get _diarizationFiles => <String>[
+    segmentationModel.modelFile,
+    embeddingModel.fileName,
+  ];
+
+  /// The paths of [files] under [directory] when its [manifestFileName]
+  /// records each at its current size, else null.
+  ///
+  /// Each file is keyed by the same relative path the install recorded. A
+  /// file system or decoding error reads as not installed, so a damaged
+  /// manifest never stops a later install from replacing it.
+  static List<String>? _resolveVerified(
+    Directory directory,
+    String manifestFileName,
+    List<String> files,
+  ) {
     try {
-      final staged = File(p.join(staging.path, model.fileName));
-      await _download(
-        name: model.displayName,
-        url: model.url,
-        expectedBytes: model.sizeBytes,
-        expectedSha256: model.sha256,
-        target: staged,
-        onProgress: onProgress,
-        cancellationToken: cancellationToken,
+      final sizes = _readManifest(
+        File(p.join(directory.path, manifestFileName)),
       );
-      await supportDirectory.create(recursive: true);
-      await _promote(
-        staged,
-        File(p.join(supportDirectory.path, model.fileName)),
-      );
-      onProgress?.call(1);
-    } finally {
-      await _discard(staging);
+      if (sizes == null) {
+        return null;
+      }
+      final paths = <String>[];
+      for (final name in files) {
+        final file = File(p.join(directory.path, name));
+        final recorded = sizes[name];
+        if (recorded == null ||
+            !file.existsSync() ||
+            file.lengthSync() != recorded) {
+          return null;
+        }
+        paths.add(file.path);
+      }
+      return paths;
+    } on FileSystemException {
+      return null;
+    } on FormatException {
+      return null;
     }
   }
 
-  Future<void> _installArchive({
+  /// Runs [stage] in a fresh staging directory, then checks that it left
+  /// every one of [files] under [manifestDirectory] of `unpacked`, records
+  /// their sizes there, and moves only the [promote] entries into
+  /// [destination], each replacing what was there.
+  ///
+  /// [manifestDirectory] and [promote] are relative to `unpacked` and to
+  /// [destination]; an empty [manifestDirectory] puts the manifest in
+  /// [destination] itself, which is removed before the files move and
+  /// written after them, so nothing resolves until every file is in place.
+  Future<void> _installStaged({
     required String name,
-    required String url,
-    required int expectedBytes,
-    required String? expectedSha256,
     required Directory destination,
-    required List<String> required,
-    String? manifestDirectory,
+    required List<String> promote,
+    required String manifestDirectory,
+    required String manifestFileName,
+    required List<String> files,
+    required Future<void> Function(Directory staging, Directory unpacked) stage,
     SherpaInstallProgress? onProgress,
     AudioCancellationToken? cancellationToken,
   }) async {
-    final staging = await _stagingDirectory();
+    final staging = await _openStaging();
     try {
-      final archive = File(p.join(staging.path, p.basename(url)));
-      await _download(
-        name: name,
-        url: url,
-        expectedBytes: expectedBytes,
-        expectedSha256: expectedSha256,
-        target: archive,
-        // Extraction is the last 20% of the reported progress.
-        onProgress: onProgress == null
-            ? null
-            : (progress) => onProgress(progress * 0.8),
-        cancellationToken: cancellationToken,
-      );
-      final unpacked = Directory(p.join(staging.path, 'unpacked'));
-      await _extract(
-        name: name,
-        archive: archive,
-        unpacked: unpacked,
-        onProgress: onProgress == null
-            ? null
-            : (progress) => onProgress(0.8 + progress * 0.2),
-        cancellationToken: cancellationToken,
-      );
+      final unpacked = Directory(p.join(staging.directory.path, 'unpacked'));
+      await unpacked.create(recursive: true);
+      await stage(staging.directory, unpacked);
       cancellationToken?.throwIfCancelled();
-      for (final file in required) {
-        if (!File(p.join(unpacked.path, file)).existsSync()) {
+      final manifestDir = p.join(unpacked.path, manifestDirectory);
+      for (final file in files) {
+        if (!File(p.join(manifestDir, file)).existsSync()) {
           throw sherpaSpeechFailure(
             'sherpa_model_install_incomplete',
             'install',
@@ -357,87 +402,211 @@ final class SherpaModelRegistry {
           );
         }
       }
-      if (manifestDirectory != null) {
-        _writeManifest(
-          Directory(p.join(unpacked.path, manifestDirectory)),
-          <String>[
-            for (final file in required)
-              if (p.split(file).first == manifestDirectory)
-                p.relative(file, from: manifestDirectory),
-          ],
+      final stagedManifest = p.join(manifestDir, manifestFileName);
+      _writeManifest(File(stagedManifest), manifestDir, files);
+      await destination.create(recursive: true);
+      final manifestAtRoot = manifestDirectory.isEmpty;
+      final installedManifest = File(
+        p.join(destination.path, manifestFileName),
+      );
+      if (manifestAtRoot && installedManifest.existsSync()) {
+        await installedManifest.delete();
+      }
+      for (final entry in promote) {
+        await _promote(
+          p.join(unpacked.path, entry),
+          p.join(destination.path, entry),
         );
       }
-      await destination.create(recursive: true);
-      // Each top-level entry replaces what was there, so a half-written
-      // earlier attempt never mixes with this one.
-      for (final entry in unpacked.listSync()) {
-        await _promote(
-          entry,
-          FileSystemEntity.isDirectorySync(entry.path)
-              ? Directory(p.join(destination.path, p.basename(entry.path)))
-              : File(p.join(destination.path, p.basename(entry.path))),
-        );
+      if (manifestAtRoot) {
+        await _promote(stagedManifest, installedManifest.path);
       }
       onProgress?.call(1);
     } finally {
-      await _discard(staging);
+      await staging.discard();
     }
   }
 
-  /// Records the size of each of [files] in [directory]'s manifest. It is
+  /// Downloads the archive at [url] into [staging] and unpacks it into
+  /// [unpacked]; extraction is the last 20% of the reported progress.
+  Future<void> _fetchArchive({
+    required String name,
+    required String url,
+    required int expectedBytes,
+    required String? expectedSha256,
+    required Directory staging,
+    required Directory unpacked,
+    SherpaInstallProgress? onProgress,
+    AudioCancellationToken? cancellationToken,
+  }) async {
+    final archive = File(p.join(staging.path, p.basename(url)));
+    await _download(
+      name: name,
+      url: url,
+      expectedBytes: expectedBytes,
+      expectedSha256: expectedSha256,
+      target: archive,
+      onProgress: onProgress == null
+          ? null
+          : (progress) => onProgress(progress * 0.8),
+      cancellationToken: cancellationToken,
+    );
+    await _extract(
+      name: name,
+      archive: archive,
+      unpacked: unpacked,
+      onProgress: onProgress == null
+          ? null
+          : (progress) => onProgress(0.8 + progress * 0.2),
+      cancellationToken: cancellationToken,
+    );
+  }
+
+  /// Records the size of each of [files] in [directory] in [manifest]. It is
   /// written in staging, so it moves into place with the files it describes.
-  static void _writeManifest(Directory directory, List<String> files) {
-    File(p.join(directory.path, installManifestFileName)).writeAsStringSync(
+  static void _writeManifest(
+    File manifest,
+    String directory,
+    List<String> files,
+  ) {
+    manifest.writeAsStringSync(
       jsonEncode(<String, Object>{
         'version': 1,
         'files': <String, int>{
           for (final file in files)
-            file: File(p.join(directory.path, file)).lengthSync(),
+            file: File(p.join(directory, file)).lengthSync(),
         },
       }),
     );
   }
 
-  /// The recorded file sizes, or null when the manifest is missing or
-  /// unreadable.
-  static Map<String, int>? _readManifest(Directory directory) {
-    final manifest = File(p.join(directory.path, installManifestFileName));
+  /// The recorded file sizes, or null when [manifest] is missing or has
+  /// another shape; reading or decoding it may throw.
+  static Map<String, int>? _readManifest(File manifest) {
     if (!manifest.existsSync()) {
       return null;
     }
-    try {
-      final json = jsonDecode(manifest.readAsStringSync());
-      if (json case {'version': 1, 'files': final Map<String, Object?> files}) {
-        return <String, int>{
-          for (final MapEntry(:key, :value) in files.entries)
-            if (value is int) key: value,
-        };
-      }
-    } on FormatException {
-      return null;
+    final json = jsonDecode(manifest.readAsStringSync());
+    if (json case {'version': 1, 'files': final Map<String, Object?> files}) {
+      return <String, int>{
+        for (final MapEntry(:key, :value) in files.entries)
+          if (value is int) key: value,
+      };
     }
     return null;
   }
 
   /// Moves verified [staged] content to [target], replacing it.
-  static Future<void> _promote(
-    FileSystemEntity staged,
-    FileSystemEntity target,
-  ) async {
-    if (target.existsSync()) {
-      await target.delete(recursive: true);
+  static Future<void> _promote(String staged, String target) async {
+    final isDirectory = FileSystemEntity.isDirectorySync(staged);
+    final FileSystemEntity existing = FileSystemEntity.isDirectorySync(target)
+        ? Directory(target)
+        : File(target);
+    if (existing.existsSync()) {
+      await existing.delete(recursive: true);
     }
-    await staged.rename(target.path);
+    await Directory(p.dirname(target)).create(recursive: true);
+    await (isDirectory ? Directory(staged) : File(staged)).rename(target);
   }
 
-  static Future<void> _discard(Directory staging) async {
-    if (staging.existsSync()) {
-      await staging.delete(recursive: true);
+  /// Staging directories held by installs running in this isolate. Locks
+  /// are held per process, so they alone cannot tell another registry in
+  /// this process that a directory is in use.
+  static final Set<String> _activeStaging = <String>{};
+
+  static int _stagingCounter = 0;
+
+  /// A fresh directory under [root] that one install downloads and extracts
+  /// into; nothing in it is visible to the resolvers.
+  ///
+  /// The install holds an exclusive lock on a sibling `.lock` file while the
+  /// directory exists. Before creating its own, it removes every staging
+  /// directory whose lock nobody holds: the leftovers of an install whose
+  /// process exited before it could clean up.
+  Future<_Staging> _openStaging() async {
+    final parent = Directory(p.join(root.path, '.staging'));
+    await parent.create(recursive: true);
+    await _sweepAbandonedStaging(parent);
+    final name =
+        'install-$pid-${DateTime.now().microsecondsSinceEpoch}-'
+        '${_stagingCounter++}';
+    final directory = Directory(p.join(parent.path, name));
+    final key = p.canonicalize(directory.path);
+    _activeStaging.add(key);
+    final lockFile = File('${directory.path}.lock');
+    RandomAccessFile? lock;
+    try {
+      // The lock exists before the directory, so no sweep ever sees the
+      // directory unlocked.
+      lock = await lockFile.open(mode: FileMode.write);
+      await lock.lock(FileLock.exclusive);
+      await directory.create();
+      return _Staging(directory, lockFile, lock, key);
+    } on Object {
+      await lock?.close();
+      _activeStaging.remove(key);
+      rethrow;
+    }
+  }
+
+  static Future<void> _sweepAbandonedStaging(Directory parent) async {
+    final List<FileSystemEntity> entries;
+    try {
+      entries = parent.listSync();
+    } on FileSystemException {
+      return;
+    }
+    for (final entry in entries) {
+      final isLock = entry is File && entry.path.endsWith('.lock');
+      final directoryPath = isLock
+          ? entry.path.substring(0, entry.path.length - '.lock'.length)
+          : entry.path;
+      if (!isLock && entry is! Directory) continue;
+      if (isLock && FileSystemEntity.isDirectorySync(directoryPath)) {
+        continue; // Swept with its directory.
+      }
+      if (_activeStaging.contains(p.canonicalize(directoryPath))) continue;
+      final lockFile = File('$directoryPath.lock');
+      RandomAccessFile? lock;
+      try {
+        lock = await lockFile.open(mode: FileMode.append);
+        await lock.lock(FileLock.exclusive);
+      } on FileSystemException {
+        // Another process's install holds it.
+        await lock?.close();
+        continue;
+      }
+      try {
+        final directory = Directory(directoryPath);
+        if (directory.existsSync()) {
+          await directory.delete(recursive: true);
+        }
+      } on FileSystemException {
+        // Left for a later sweep.
+      } finally {
+        await lock.close();
+        _deleteQuietly(lockFile);
+      }
+    }
+  }
+
+  static void _deleteQuietly(File file) {
+    try {
+      if (file.existsSync()) file.deleteSync();
+    } on FileSystemException {
+      // Another sweep removed it, or it is open elsewhere.
     }
   }
 
   /// Streams [url] into [target], checking its exact size and, when known,
   /// its SHA-256 as the bytes arrive.
+  ///
+  /// One deadline covers the wait for the response and the gaps between
+  /// chunks. When it passes, or [cancellationToken] fires, the transfer
+  /// settles at once as stalled or cancelled: the body subscription is
+  /// cancelled and the client closed, but the wait never depends on the
+  /// transport honouring either. The body is written through an awaited
+  /// `addStream`, so a slow disk pauses the download instead of buffering it.
   Future<void> _download({
     required String name,
     required String url,
@@ -449,40 +618,45 @@ final class SherpaModelRegistry {
   }) async {
     cancellationToken?.throwIfCancelled();
     final client = _httpClientFactory();
-    // Closing the client aborts a request that is waiting on the network.
-    final registration = cancellationToken?.register((_) => client.close());
-    // A watchdog closes the client when the connection or the body goes
-    // quiet for [stallTimeout]; the transfer then fails as stalled.
-    var stalled = false;
-    // Ends the wait for a response that never comes; closing the client does
-    // not end it on every transport.
-    final quiet = Completer<void>();
-    Timer? watchdog;
-    void watch() {
-      watchdog?.cancel();
-      watchdog = Timer(stallTimeout, () {
-        stalled = true;
-        client.close();
-        if (!quiet.isCompleted) quiet.complete();
-      });
+    // Settles the transfer: completed once every byte is on disk, failed by
+    // the first error, the deadline or cancellation.
+    final outcome = Completer<void>();
+    StreamSubscription<List<int>>? body;
+    StreamController<List<int>>? checked;
+    Timer? deadline;
+
+    void fail(Object error, [StackTrace? stackTrace]) {
+      if (outcome.isCompleted) return;
+      deadline?.cancel();
+      outcome.completeError(error, stackTrace);
+      body?.cancel().ignore();
+      if (checked != null && !checked.isClosed) checked.close().ignore();
+      client.close();
     }
 
+    void arm() {
+      deadline?.cancel();
+      deadline = Timer(stallTimeout, () => fail(_stalled(name)));
+    }
+
+    final registration = cancellationToken?.register(
+      (cancellation) => fail(AudioCancelledException(cancellation)),
+    );
     IOSink? sink;
+    Future<void>? writing;
     try {
+      arm();
       final http.StreamedResponse response;
-      watch();
       try {
-        response = await Future.any([
+        response = await Future.any(<Future<http.StreamedResponse>>[
           client.send(http.Request('GET', Uri.parse(url))),
-          // A request that never answers is not ended by closing the client
-          // on every transport; the watchdog's mark ends the wait.
-          Future<void>.delayed(
-            stallTimeout,
-          ).then<http.StreamedResponse>((_) => throw _stalled(name)),
+          outcome.future.then<http.StreamedResponse>(
+            (_) => throw StateError('settled before the response'),
+          ),
         ]);
       } on Object {
-        cancellationToken?.throwIfCancelled();
-        if (stalled) throw _stalled(name);
+        // Closing the client fails the request too; report why it closed.
+        if (outcome.isCompleted) await outcome.future;
         rethrow;
       }
       if (response.statusCode != 200) {
@@ -499,30 +673,47 @@ final class SherpaModelRegistry {
       }
       final digest = _DigestSink();
       final hasher = crypto.sha256.startChunkedConversion(digest);
-      sink = target.openWrite();
       var received = 0;
-      try {
-        watch();
-        await for (final chunk in response.stream) {
-          watch();
-          cancellationToken?.throwIfCancelled();
+      final controller = checked = StreamController<List<int>>(
+        sync: true,
+        // A disk that is still writing is not a stalled network.
+        onPause: () {
+          deadline?.cancel();
+          body?.pause();
+        },
+        onResume: () {
+          if (outcome.isCompleted) return;
+          arm();
+          body?.resume();
+        },
+      );
+      final output = sink = target.openWrite();
+      writing = output.addStream(controller.stream).then((_) {
+        if (!outcome.isCompleted) outcome.complete();
+      }, onError: fail);
+      arm();
+      body = response.stream.listen(
+        (chunk) {
+          if (outcome.isCompleted) return;
+          arm();
           received += chunk.length;
           if (received > expectedBytes) {
-            throw _sizeMismatch(name, expectedBytes, received);
+            fail(_sizeMismatch(name, expectedBytes, received));
+            return;
           }
-          sink.add(chunk);
           hasher.add(chunk);
+          controller.add(chunk);
           onProgress?.call((received / expectedBytes).clamp(0, 1));
-        }
-      } on Object {
-        cancellationToken?.throwIfCancelled();
-        if (stalled) throw _stalled(name);
-        rethrow;
-      }
-      watchdog?.cancel();
-      cancellationToken?.throwIfCancelled();
-      await sink.flush();
-      await sink.close();
+        },
+        onError: fail,
+        onDone: () {
+          if (!controller.isClosed) controller.close().ignore();
+        },
+        cancelOnError: true,
+      );
+      await outcome.future;
+      deadline?.cancel();
+      await output.close();
       sink = null;
       hasher.close();
       if (received != expectedBytes) {
@@ -537,9 +728,15 @@ final class SherpaModelRegistry {
         );
       }
     } finally {
-      watchdog?.cancel();
+      deadline?.cancel();
       registration?.dispose();
-      await sink?.close();
+      if (checked != null && !checked.isClosed) checked.close().ignore();
+      try {
+        await writing;
+        await sink?.close();
+      } on Object {
+        // The transfer already failed; the staged file is discarded.
+      }
       client.close();
     }
   }
@@ -555,7 +752,8 @@ final class SherpaModelRegistry {
   /// Unpacks [archive] into [unpacked], reporting how much of the archive
   /// has been read. The system's `tar` reads it from a pipe, so progress
   /// follows its decoding and cancelling stops it; without one, the bundled
-  /// bzip2 decoder runs off the caller's isolate, reporting only its end.
+  /// bzip2 decoder runs in a worker isolate that is given only the two paths
+  /// and that cancelling kills, reporting only its end.
   Future<void> _extract({
     required String name,
     required File archive,
@@ -563,11 +761,16 @@ final class SherpaModelRegistry {
     SherpaInstallProgress? onProgress,
     AudioCancellationToken? cancellationToken,
   }) async {
+    cancellationToken?.throwIfCancelled();
     await unpacked.create(recursive: true);
     final tar = _systemTar;
     if (tar == null) {
-      final archivePath = archive.path, unpackedPath = unpacked.path;
-      await Isolate.run(() => _extractTarBz2(archivePath, unpackedPath));
+      await _extractInWorker(
+        name: name,
+        archivePath: archive.path,
+        unpackedPath: unpacked.path,
+        cancellationToken: cancellationToken,
+      );
       onProgress?.call(1);
       return;
     }
@@ -610,6 +813,59 @@ final class SherpaModelRegistry {
     }
   }
 
+  /// Runs the bundled decoder in a spawned isolate. Only the two paths and a
+  /// port cross to it, so no caller state has to be sendable, and cancelling
+  /// kills it; the wait ends once the worker has exited, so nothing writes
+  /// into staging after it is discarded.
+  static Future<void> _extractInWorker({
+    required String name,
+    required String archivePath,
+    required String unpackedPath,
+    AudioCancellationToken? cancellationToken,
+  }) async {
+    final result = Completer<void>();
+    final port = RawReceivePort();
+    port.handler = (Object? message) {
+      if (result.isCompleted) return;
+      if (message == _workerDone) {
+        result.complete();
+      } else {
+        final reason = message is List && message.isNotEmpty
+            ? '${message.first}'
+            : 'the decoder stopped';
+        result.completeError(
+          sherpaSpeechFailure(
+            'sherpa_model_extract_failed',
+            'install',
+            'The $name archive could not be unpacked: $reason',
+          ),
+        );
+      }
+    };
+    AudioCancellationRegistration? registration;
+    try {
+      final worker = await Isolate.spawn<(String, String, SendPort)>(
+        _extractInWorkerMain,
+        (archivePath, unpackedPath, port.sendPort),
+        onError: port.sendPort,
+        onExit: port.sendPort,
+        errorsAreFatal: true,
+      );
+      registration = cancellationToken?.register(
+        (_) => worker.kill(priority: Isolate.immediate),
+      );
+      await result.future;
+    } on Object {
+      cancellationToken?.throwIfCancelled();
+      rethrow;
+    } finally {
+      registration?.dispose();
+      port.close();
+    }
+  }
+
+  static const String _workerDone = 'done';
+
   static SpeechFailure _sizeMismatch(String name, int expected, int actual) =>
       sherpaSpeechFailure(
         'sherpa_model_download_incomplete',
@@ -630,6 +886,36 @@ final class _DigestSink implements Sink<crypto.Digest> {
 
   @override
   void close() {}
+}
+
+/// One install's staging directory and the lock that marks it in use.
+final class _Staging {
+  _Staging(this.directory, this._lockFile, this._lock, this._key);
+
+  final Directory directory;
+  final File _lockFile;
+  final RandomAccessFile _lock;
+  final String _key;
+
+  /// Deletes the directory, then releases and removes its lock.
+  Future<void> discard() async {
+    try {
+      if (directory.existsSync()) {
+        await directory.delete(recursive: true);
+      }
+    } finally {
+      await _lock.close();
+      SherpaModelRegistry._deleteQuietly(_lockFile);
+      SherpaModelRegistry._activeStaging.remove(_key);
+    }
+  }
+}
+
+/// The bundled decoder's worker: extracts, then reports success.
+void _extractInWorkerMain((String, String, SendPort) message) {
+  final (archivePath, destinationPath, reply) = message;
+  _extractTarBz2(archivePath, destinationPath);
+  reply.send(SherpaModelRegistry._workerDone);
 }
 
 /// Extracts the `.tar.bz2` at [archivePath] into [destinationPath].

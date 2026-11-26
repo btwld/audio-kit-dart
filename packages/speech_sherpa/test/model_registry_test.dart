@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -12,6 +13,33 @@ import 'package:speech_core/speech_core.dart';
 import 'package:speech_sherpa/speech_sherpa.dart';
 
 import 'support/fakes.dart';
+
+/// Skips a test that needs the system's `tar` where the registry has none.
+final Object noSystemTar = Platform.isMacOS || Platform.isLinux
+    ? false
+    : 'no system tar';
+
+/// Builds a real `.tar.bz2` holding [files].
+Uint8List buildArchiveOf(Map<String, List<int>> files) {
+  final archive = Archive();
+  for (final entry in files.entries) {
+    archive.add(ArchiveFile.bytes(entry.key, entry.value));
+  }
+  final tar = TarEncoder().encodeBytes(archive);
+  return Uint8List.fromList(BZip2Encoder().encode(tar));
+}
+
+/// [length] bytes bzip2 cannot shrink, so an archive of them spans many
+/// read chunks.
+Uint8List noise(int length, {int seed = 1}) {
+  final random = Random(seed);
+  return Uint8List.fromList(
+    List<int>.generate(length, (_) => random.nextInt(256)),
+  );
+}
+
+/// Fails a test that would otherwise wait forever on a hung transfer.
+const Timeout hangs = Timeout(Duration(seconds: 10));
 
 void main() {
   late Directory root;
@@ -27,15 +55,9 @@ void main() {
   });
 
   /// Builds a real `.tar.bz2` so the extraction path is exercised end to end.
-  Uint8List buildArchive(Map<String, String> files) {
-    final archive = Archive();
-    for (final entry in files.entries) {
-      final bytes = utf8.encode(entry.value);
-      archive.add(ArchiveFile.bytes(entry.key, bytes));
-    }
-    final tar = TarEncoder().encodeBytes(archive);
-    return Uint8List.fromList(BZip2Encoder().encode(tar));
-  }
+  Uint8List buildArchive(Map<String, String> files) => buildArchiveOf({
+    for (final entry in files.entries) entry.key: utf8.encode(entry.value),
+  });
 
   group('resolve', () {
     test('returns null until every required file exists', () {
@@ -97,7 +119,13 @@ void main() {
       );
       segmentation.parent.createSync(recursive: true);
       segmentation.writeAsStringSync('segmentation');
+      // Both files are there, but no install recorded them as a pair.
+      expect(registry.resolveDiarization(), isNull);
 
+      writeInstallManifest(support, <String>[
+        SherpaArchivedFileModel.pyannoteSegmentation.modelFile,
+        SherpaFileModel.wespeakerResnet34.fileName,
+      ], name: SherpaModelRegistry.diarizationManifestFileName);
       final resolved = registry.resolveDiarization();
       expect(resolved, isNotNull);
       // The embedding model ID travels with the vectors it produces.
@@ -112,11 +140,12 @@ void main() {
       Uint8List archive, {
       String? sha256,
       int? bytes,
+      String url = 'https://example.test/test-transducer.tar.bz2',
     }) => SherpaRecognitionModel(
       id: 'test-transducer',
       displayName: 'Test transducer',
       kind: SherpaRecognitionModelKind.transducer,
-      archiveUrl: 'https://example.test/test-transducer.tar.bz2',
+      archiveUrl: url,
       archiveBytes: bytes ?? archive.length,
       archiveSha256: sha256 ?? crypto.sha256.convert(archive).toString(),
       unpackedDirName: 'test-transducer',
@@ -298,6 +327,71 @@ void main() {
       expectNothingInstalled(registry, model);
     });
 
+    test('cancelling ends a body that outlives closing the client', () async {
+      final archive = completeArchive();
+      final model = modelFor(archive);
+      final controller = AudioCancellationController();
+      final registry = SherpaModelRegistry(
+        root: root,
+        httpClientFactory: () => _FakeClient(
+          {model.archiveUrl: archive},
+          holdAfterFirstChunk: true,
+          ignoreClose: true,
+        ),
+      );
+
+      final install = registry.installRecognition(
+        model,
+        cancellationToken: controller.token,
+        onProgress: (progress) {
+          if (progress > 0) controller.cancel();
+        },
+      );
+
+      await expectLater(install, throwsA(isA<AudioCancelledException>()));
+      expectNothingInstalled(registry, model);
+    }, timeout: hangs);
+
+    test('a slow disk holds the download back', () async {
+      final body = noise(2 << 20);
+      final vad = SherpaFileModel(
+        id: 'test-vad',
+        displayName: 'Test VAD',
+        url: 'https://example.test/vad.onnx',
+        fileName: 'vad.onnx',
+        sizeBytes: body.length,
+      );
+      int onDisk() {
+        final staging = Directory('${root.path}/.staging');
+        for (final entry in staging.listSync(recursive: true)) {
+          if (entry is File && entry.path.endsWith('vad.onnx')) {
+            return entry.lengthSync();
+          }
+        }
+        return 0;
+      }
+
+      final ahead = <int>[];
+      final registry = SherpaModelRegistry(
+        root: root,
+        httpClientFactory: () => _PacedClient(
+          body,
+          chunkSize: 256 * 1024,
+          beforeChunk: (sent) => ahead.add(sent - onDisk()),
+        ),
+        vadModel: vad,
+      );
+
+      await registry.installVad();
+
+      expect(ahead, hasLength(8));
+      expect(
+        ahead,
+        everyElement(0),
+        reason: 'no chunk is read before the previous one is on disk',
+      );
+    });
+
     group('a verified install stops resolving when', () {
       late SherpaModelRegistry registry;
       late SherpaRecognitionModel model;
@@ -345,6 +439,166 @@ void main() {
           '${dir.path}/${SherpaModelRegistry.installManifestFileName}',
         ).writeAsStringSync('{');
         expect(registry.resolveRecognition(model), isNull);
+      });
+
+      test('the manifest is not valid UTF-8', () {
+        File(
+          '${dir.path}/${SherpaModelRegistry.installManifestFileName}',
+        ).writeAsBytesSync(<int>[0x7b, 0xff, 0x7d]);
+        expect(registry.resolveRecognition(model), isNull);
+      });
+
+      test('the manifest cannot be read', () {
+        final manifest = File(
+          '${dir.path}/${SherpaModelRegistry.installManifestFileName}',
+        )..deleteSync();
+        Directory(manifest.path).createSync();
+        expect(registry.resolveRecognition(model), isNull);
+      });
+    });
+
+    test('a retry replaces a manifest that cannot be decoded', () async {
+      final archive = completeArchive();
+      final model = modelFor(archive);
+      final client = _FakeClient({model.archiveUrl: archive});
+      final registry = SherpaModelRegistry(
+        root: root,
+        httpClientFactory: () => client,
+      );
+      await registry.installRecognition(model);
+      File(
+        '${registry.recognitionDirectory(model).path}/'
+        '${SherpaModelRegistry.installManifestFileName}',
+      ).writeAsBytesSync(<int>[0xff]);
+
+      final paths = await registry.installRecognition(model);
+
+      expect(File(paths.encoder).readAsStringSync(), 'encoder');
+      expect(registry.resolveRecognition(model), isNotNull);
+      expect(client.requested, hasLength(2));
+    });
+
+    test('only the model directory moves into place', () async {
+      final archive = buildArchive(<String, String>{
+        'test-transducer/encoder.onnx': 'encoder',
+        'test-transducer/decoder.onnx': 'decoder',
+        'test-transducer/joiner.onnx': 'joiner',
+        'test-transducer/tokens.txt': 'tokens',
+        'docs/LICENSE': 'license',
+        'README.md': 'readme',
+      });
+      final model = modelFor(archive);
+      final notes = File('${root.path}/docs/local-notes')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('kept');
+      final registry = SherpaModelRegistry(
+        root: root,
+        httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
+      );
+
+      await registry.installRecognition(model);
+
+      expect(registry.resolveRecognition(model), isNotNull);
+      expect(notes.readAsStringSync(), 'kept');
+      expect(File('${root.path}/docs/LICENSE').existsSync(), isFalse);
+      expect(File('${root.path}/README.md').existsSync(), isFalse);
+    });
+
+    test('a model whose files sit in a subdirectory resolves', () async {
+      final archive = buildArchive(<String, String>{
+        'test-nested/sub/encoder.onnx': 'encoder',
+        'test-nested/sub/decoder.onnx': 'decoder',
+        'test-nested/tokens.txt': 'tokens',
+      });
+      final model = SherpaRecognitionModel(
+        id: 'test-nested',
+        displayName: 'Test nested',
+        kind: SherpaRecognitionModelKind.whisper,
+        archiveUrl: 'https://example.test/test-nested.tar.bz2',
+        archiveBytes: archive.length,
+        archiveSha256: crypto.sha256.convert(archive).toString(),
+        unpackedDirName: 'test-nested',
+        encoderFile: 'sub/encoder.onnx',
+        decoderFile: 'sub/decoder.onnx',
+        tokensFile: 'tokens.txt',
+      );
+      final registry = SherpaModelRegistry(
+        root: root,
+        httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
+      );
+
+      final paths = await registry.installRecognition(model);
+
+      expect(File(paths.encoder).readAsStringSync(), 'encoder');
+      expect(registry.resolveRecognition(model), isNotNull);
+    });
+
+    group('staging', () {
+      test('a later install removes what an exited install left', () async {
+        final abandoned = Directory('${root.path}/.staging/install-abandoned')
+          ..createSync(recursive: true);
+        File('${abandoned.path}/archive.tar.bz2').writeAsStringSync('part');
+        File('${root.path}/.staging/install-gone.lock').writeAsStringSync('');
+        final archive = completeArchive();
+        final model = modelFor(archive);
+        final registry = SherpaModelRegistry(
+          root: root,
+          httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
+        );
+
+        await registry.installRecognition(model);
+
+        expect(Directory('${root.path}/.staging').listSync(), isEmpty);
+      });
+
+      test('an install keeps the staging of one still running', () async {
+        final archive = completeArchive();
+        final model = modelFor(archive);
+        final controller = AudioCancellationController();
+        final started = Completer<void>();
+        final running = SherpaModelRegistry(
+          root: root,
+          httpClientFactory: () => _FakeClient({
+            model.archiveUrl: archive,
+          }, holdAfterFirstChunk: true),
+          stallTimeout: const Duration(minutes: 1),
+        );
+        final held = running.installRecognition(
+          model,
+          cancellationToken: controller.token,
+          onProgress: (progress) {
+            if (progress > 0 && !started.isCompleted) started.complete();
+          },
+        );
+        await started.future;
+        List<FileSystemEntity> stagedDirectories() => Directory(
+          '${root.path}/.staging',
+        ).listSync().whereType<Directory>().toList();
+        final before = stagedDirectories();
+        expect(before, hasLength(1));
+
+        final body = Uint8List.fromList(<int>[1, 2, 3, 4]);
+        final vad = SherpaFileModel(
+          id: 'test-vad',
+          displayName: 'Test VAD',
+          url: 'https://example.test/vad.onnx',
+          fileName: 'vad.onnx',
+          sizeBytes: body.length,
+        );
+        await SherpaModelRegistry(
+          root: root,
+          httpClientFactory: () => _FakeClient({vad.url: body}),
+          vadModel: vad,
+        ).installVad();
+
+        expect(
+          stagedDirectories().map((entry) => entry.path),
+          before.map((entry) => entry.path),
+          reason: 'the running install keeps its staging',
+        );
+        controller.cancel();
+        await expectLater(held, throwsA(isA<AudioCancelledException>()));
+        expect(Directory('${root.path}/.staging').listSync(), isEmpty);
       });
     });
 
@@ -456,6 +710,87 @@ void main() {
       );
     });
 
+    group('diarization', () {
+      late SherpaArchivedFileModel segmentation;
+      late SherpaFileModel embedding;
+      late Map<String, Uint8List> bodies;
+
+      setUp(() {
+        final archive = buildArchive(<String, String>{
+          'segmentation/model.onnx': 'segmentation-model',
+        });
+        segmentation = SherpaArchivedFileModel(
+          id: 'test-segmentation',
+          displayName: 'Test segmentation',
+          archiveUrl: 'https://example.test/segmentation.tar.bz2',
+          archiveBytes: archive.length,
+          archiveSha256: crypto.sha256.convert(archive).toString(),
+          modelFile: 'segmentation/model.onnx',
+        );
+        final embeddingBody = Uint8List.fromList(<int>[9, 9]);
+        embedding = SherpaFileModel(
+          id: 'test-embedding',
+          displayName: 'Test embedding',
+          url: 'https://example.test/embedding.onnx',
+          fileName: 'embedding.onnx',
+          sizeBytes: embeddingBody.length,
+        );
+        bodies = {
+          segmentation.archiveUrl: archive,
+          embedding.url: embeddingBody,
+        };
+      });
+
+      SherpaModelRegistry registryWith(_FakeClient client) =>
+          SherpaModelRegistry(
+            root: root,
+            httpClientFactory: () => client,
+            segmentationModel: segmentation,
+            embeddingModel: embedding,
+          );
+
+      test('a failed embedding download leaves the pair unresolved', () async {
+        final registry = registryWith(
+          _FakeClient(bodies, statusCodes: {embedding.url: 503}),
+        );
+        // An older, broken embedding file of the same name.
+        File('${registry.supportDirectory.path}/${embedding.fileName}')
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(<int>[1]);
+
+        await expectLater(
+          registry.installDiarization(),
+          throwsA(
+            isA<SpeechFailure>().having(
+              (f) => f.code,
+              'code',
+              'sherpa_model_download_failed',
+            ),
+          ),
+        );
+
+        expect(registry.resolveDiarization(), isNull);
+        expect(
+          File(
+            '${registry.supportDirectory.path}/${segmentation.modelFile}',
+          ).existsSync(),
+          isFalse,
+          reason: 'neither file moves into place alone',
+        );
+        expect(Directory('${root.path}/.staging').listSync(), isEmpty);
+      });
+
+      test('a file changed after install stops resolving', () async {
+        final registry = registryWith(_FakeClient(bodies));
+        final paths = await registry.installDiarization();
+        expect(registry.resolveDiarization(), isNotNull);
+
+        File(paths.embedding).writeAsBytesSync(<int>[1]);
+
+        expect(registry.resolveDiarization(), isNull);
+      });
+    });
+
     test('reports a retryable failure for a server error', () async {
       final client = _FakeClient(const {}, statusCode: 503);
       final registry = SherpaModelRegistry(
@@ -546,7 +881,7 @@ void main() {
         );
         expectNotEscaped();
         expectNothingInstalled(registry, model);
-      }, skip: Platform.isMacOS || Platform.isLinux ? false : 'no system tar');
+      }, skip: noSystemTar);
 
       test('is skipped by the bundled decoder', () async {
         final archive = escaping();
@@ -581,10 +916,53 @@ void main() {
       expect(progress.last, 1);
     });
 
+    test('cancelling stops the bundled decoder while it unpacks', () async {
+      final archive = buildArchiveOf(<String, List<int>>{
+        'test-transducer/encoder.onnx': noise(6 << 20),
+        'test-transducer/decoder.onnx': utf8.encode('decoder'),
+        'test-transducer/joiner.onnx': utf8.encode('joiner'),
+        'test-transducer/tokens.txt': utf8.encode('tokens'),
+      });
+      final model = modelFor(archive);
+      final controller = AudioCancellationController();
+      final registry = SherpaModelRegistry(
+        root: root,
+        httpClientFactory: () => _FakeClient({model.archiveUrl: archive}),
+        useSystemTar: false,
+      );
+
+      final progress = <double>[];
+      final install = registry.installRecognition(
+        model,
+        cancellationToken: controller.token,
+        // The callback holds the controller, which cannot cross isolates.
+        onProgress: (value) {
+          progress.add(value);
+          if (value == 0.8) {
+            Timer(const Duration(milliseconds: 100), controller.cancel);
+          }
+        },
+      );
+
+      await expectLater(install, throwsA(isA<AudioCancelledException>()));
+      expect(
+        progress.where((value) => value > 0.8),
+        isEmpty,
+        reason: 'the decoder stops instead of running to the end',
+      );
+      expectNothingInstalled(registry, model);
+    });
+
     test(
       'unpacking reports its progress after the download, up to 1',
       () async {
-        final archive = completeArchive();
+        // Several read chunks, so progress has values between the ends.
+        final archive = buildArchiveOf(<String, List<int>>{
+          'test-transducer/encoder.onnx': noise(300 * 1024),
+          'test-transducer/decoder.onnx': utf8.encode('decoder'),
+          'test-transducer/joiner.onnx': utf8.encode('joiner'),
+          'test-transducer/tokens.txt': utf8.encode('tokens'),
+        });
         final model = modelFor(archive);
         final registry = SherpaModelRegistry(
           root: root,
@@ -596,12 +974,17 @@ void main() {
 
         final unpacking = progress.where((value) => value > 0.8).toList();
         expect(unpacking, isNotEmpty, reason: 'unpacking is not silent');
+        expect(
+          unpacking.where((value) => value < 1),
+          isNotEmpty,
+          reason: 'progress follows the archive as tar reads it',
+        );
         expect(unpacking.last, 1);
         for (var i = 1; i < progress.length; i++) {
           expect(progress[i], greaterThanOrEqualTo(progress[i - 1]));
         }
       },
-      skip: Platform.isMacOS || Platform.isLinux ? false : 'no system tar',
+      skip: noSystemTar,
     );
 
     test('an archive tar cannot read installs nothing', () async {
@@ -623,7 +1006,7 @@ void main() {
         ),
       );
       expectNothingInstalled(registry, model);
-    }, skip: Platform.isMacOS || Platform.isLinux ? false : 'no system tar');
+    }, skip: noSystemTar);
 
     group('a download that stalls fails as retryable, installing nothing,', () {
       Matcher stalled() => throwsA(
@@ -650,6 +1033,55 @@ void main() {
 
         await expectLater(registry.installRecognition(model), stalled());
         expect(client.closed, isTrue);
+        expectNothingInstalled(registry, model);
+      });
+
+      test('on a transport whose body outlives closing the client', () async {
+        final archive = completeArchive();
+        final model = modelFor(archive);
+        final client = _FakeClient(
+          {model.archiveUrl: archive},
+          holdAfterFirstChunk: true,
+          ignoreClose: true,
+        );
+        final registry = SherpaModelRegistry(
+          root: root,
+          httpClientFactory: () => client,
+          stallTimeout: const Duration(milliseconds: 50),
+        );
+
+        await expectLater(registry.installRecognition(model), stalled());
+        expectNothingInstalled(registry, model);
+      }, timeout: hangs);
+
+      test('on a real connection that goes quiet without a length', () async {
+        final archive = completeArchive();
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        final release = Completer<void>();
+        addTearDown(() async {
+          if (!release.isCompleted) release.complete();
+          await server.close(force: true);
+        });
+        server.listen((request) async {
+          final response = request.response
+            ..persistentConnection = false
+            // No length and no chunking: the body ends when the socket does.
+            ..headers.chunkedTransferEncoding = false
+            ..add(Uint8List.sublistView(archive, 0, archive.length ~/ 2));
+          await response.flush();
+          await release.future;
+          await response.close();
+        });
+        final model = modelFor(
+          archive,
+          url: 'http://127.0.0.1:${server.port}/test-transducer.tar.bz2',
+        );
+        final registry = SherpaModelRegistry(
+          root: root,
+          stallTimeout: const Duration(milliseconds: 200),
+        );
+
+        await expectLater(registry.installRecognition(model), stalled());
         expectNothingInstalled(registry, model);
       });
 
@@ -753,6 +1185,8 @@ final class _FakeClient extends http.BaseClient {
     this.failAfterFirstChunk = false,
     this.holdAfterFirstChunk = false,
     this.holdHeaders = false,
+    this.ignoreClose = false,
+    this.statusCodes = const {},
   });
 
   final Map<String, Uint8List> _bodies;
@@ -770,6 +1204,13 @@ final class _FakeClient extends http.BaseClient {
   /// Whether the response never arrives, as on a connection that hangs.
   final bool holdHeaders;
 
+  /// Whether a held body stays held after [close], as on a transport whose
+  /// stream survives closing the client.
+  final bool ignoreClose;
+
+  /// Status codes that replace [statusCode] for particular URLs.
+  final Map<String, int> statusCodes;
+
   final List<String> requested = <String>[];
   bool closed = false;
   final _hold = Completer<void>();
@@ -782,7 +1223,7 @@ final class _FakeClient extends http.BaseClient {
     final body = _bodies[url] ?? Uint8List(0);
     return http.StreamedResponse(
       _chunks(body),
-      statusCode,
+      statusCodes[url] ?? statusCode,
       contentLength: sendLength ? body.length : null,
       request: request,
     );
@@ -795,7 +1236,7 @@ final class _FakeClient extends http.BaseClient {
       throw http.ClientException('Connection reset');
     }
     if (holdAfterFirstChunk) {
-      await _hold.future;
+      await (ignoreClose ? Completer<void>().future : _hold.future);
       throw http.ClientException('Connection closed');
     }
     yield Uint8List.sublistView(body, half);
@@ -805,5 +1246,42 @@ final class _FakeClient extends http.BaseClient {
   void close() {
     closed = true;
     if (!_hold.isCompleted) _hold.complete();
+  }
+}
+
+/// Serves [body] in [chunkSize] chunks, sending each only while the reader
+/// is not paused, and calls [beforeChunk] with the bytes sent so far before
+/// each one.
+final class _PacedClient extends http.BaseClient {
+  _PacedClient(this.body, {required this.chunkSize, required this.beforeChunk});
+
+  final Uint8List body;
+  final int chunkSize;
+  final void Function(int sent) beforeChunk;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    late final StreamController<List<int>> controller;
+    Future<void> pump() async {
+      var sent = 0;
+      while (sent < body.length) {
+        // Give the reader a turn to push back before the next chunk.
+        await Future<void>.delayed(Duration.zero);
+        if (controller.isPaused) continue;
+        beforeChunk(sent);
+        final end = min(sent + chunkSize, body.length);
+        controller.add(Uint8List.sublistView(body, sent, end));
+        sent = end;
+      }
+      await controller.close();
+    }
+
+    controller = StreamController<List<int>>(onListen: pump);
+    return http.StreamedResponse(
+      controller.stream,
+      200,
+      contentLength: body.length,
+      request: request,
+    );
   }
 }
