@@ -57,6 +57,10 @@ void main() {
     File(
       '${support.path}/${SherpaFileModel.wespeakerResnet34.fileName}',
     ).writeAsStringSync('embedding');
+    writeInstallManifest(support, <String>[
+      SherpaArchivedFileModel.pyannoteSegmentation.modelFile,
+      SherpaFileModel.wespeakerResnet34.fileName,
+    ], name: SherpaModelRegistry.diarizationManifestFileName);
   }
 
   void installVad() {
